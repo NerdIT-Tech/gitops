@@ -1,0 +1,39 @@
+{
+  "features": {
+    "ghcr.io/devcontainers-extra/features/claude-code:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/devcontainers-extra/features/claude-code@sha256:cce04f0fb8313336f679c243f032338434d9386d4857c3d38e1253b1e3d62a00",
+      "integrity": "sha256:cce04f0fb8313336f679c243f032338434d9386d4857c3d38e1253b1e3d62a00"
+    },
+    "ghcr.io/devcontainers-extra/features/tflint:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/devcontainers-extra/features/tflint@sha256:667d2ae4f28687b9222818a2aeb2ff5e1f1b45b7430f0a5d99ecab1ea4f05284",
+      "integrity": "sha256:667d2ae4f28687b9222818a2aeb2ff5e1f1b45b7430f0a5d99ecab1ea4f05284"
+    },
+    "ghcr.io/devcontainers/features/aws-cli:1": {
+      "version": "1.1.4",
+      "resolved": "ghcr.io/devcontainers/features/aws-cli@sha256:1f93c8315b7a6d76982ebb2269f8b0d50413fc0f965c032edf4aee0caceb73ef",
+      "integrity": "sha256:1f93c8315b7a6d76982ebb2269f8b0d50413fc0f965c032edf4aee0caceb73ef"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "1.4.4",
+      "resolved": "ghcr.io/devcontainers/features/terraform@sha256:c6a4ed166fb749670db856c549f8858037c0af9ab3aacaf85fcb8634fadf6b05",
+      "integrity": "sha256:c6a4ed166fb749670db856c549f8858037c0af9ab3aacaf85fcb8634fadf6b05"
+    },
+    "ghcr.io/jasonthedeveloper/features/trivy:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/jasonthedeveloper/features/trivy@sha256:c2f95d6884821376bec12a7b778fce22dbfc41267bda00c2d09e653eea18345b",
+      "integrity": "sha256:c2f95d6884821376bec12a7b778fce22dbfc41267bda00c2d09e653eea18345b"
+    },
+    "ghcr.io/roul/devcontainer-features/bitwarden-cli:1": {
+      "version": "1.0.1",
+      "resolved": "ghcr.io/roul/devcontainer-features/bitwarden-cli@sha256:1de09a6fcf3c58095a633ae3019328193c7119dbbbbaf24037b201195e0a8b25",
+      "integrity": "sha256:1de09a6fcf3c58095a633ae3019328193c7119dbbbbaf24037b201195e0a8b25"
+    },
+    "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {
+      "version": "0.1.0",
+      "resolved": "ghcr.io/stu-bell/devcontainer-features/claude-code@sha256:f87b4da3f8648db9111cb25c6bd3817d096018d81f3fb596340f7ffdba14409a",
+      "integrity": "sha256:f87b4da3f8648db9111cb25c6bd3817d096018d81f3fb596340f7ffdba14409a"
+    }
+  }
+}

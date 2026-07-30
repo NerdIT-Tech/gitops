@@ -1,0 +1,98 @@
+variant: fcos
+version: 1.5.0
+
+storage:
+  directories:
+    - path: /var/lib/omada/data
+      mode: 0750
+      user:
+        id: ${container_puid}
+      group:
+        id: ${container_pgid}
+    - path: /var/lib/omada/logs
+      mode: 0750
+      user:
+        id: ${container_puid}
+      group:
+        id: ${container_pgid}
+
+  files:
+    - path: /etc/containers/systemd/omada.container
+      mode: 0644
+      contents:
+        inline: |
+          [Unit]
+          Description=TP-Link Omada SDN Controller
+          After=network-online.target
+          Wants=network-online.target
+
+          [Container]
+          Image=docker.io/mbentley/omada-controller:${omada_image_tag}
+          ContainerName=omada-controller
+          AutoUpdate=registry
+          Network=host
+
+          Environment=PUID=${container_puid}
+          Environment=PGID=${container_pgid}
+          Environment=TZ=${timezone}
+          Environment=MANAGE_HTTP_PORT=8088
+          Environment=MANAGE_HTTPS_PORT=8043
+          Environment=PORTAL_HTTP_PORT=8088
+          Environment=PORTAL_HTTPS_PORT=8843
+          Environment=SHOW_SERVER_LOGS=true
+
+          Volume=/var/lib/omada/data:/opt/tplink/EAPController/data:Z
+          Volume=/var/lib/omada/logs:/opt/tplink/EAPController/logs:Z
+
+          HealthCmd=curl -k -f https://localhost:8043
+          HealthInterval=30s
+          HealthTimeout=10s
+          HealthRetries=3
+
+          [Service]
+          Restart=always
+          TimeoutStartSec=300
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - path: /etc/firewalld/services/omada.xml
+      mode: 0644
+      contents:
+        inline: |
+          <?xml version="1.0" encoding="utf-8"?>
+          <service>
+            <short>Omada Controller</short>
+            <description>TP-Link Omada SDN Controller management and discovery ports</description>
+            <port protocol="tcp" port="8088"/>
+            <port protocol="tcp" port="8043"/>
+            <port protocol="tcp" port="8843"/>
+            <port protocol="tcp" port="29814"/>
+            <port protocol="udp" port="29810"/>
+            <port protocol="udp" port="29811"/>
+            <port protocol="udp" port="29812"/>
+            <port protocol="udp" port="29813"/>
+          </service>
+
+systemd:
+  units:
+    - name: podman-auto-update.timer
+      enabled: true
+
+    - name: omada-firewall.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Open Omada Controller ports in firewalld
+        After=firewalld.service
+        Requires=firewalld.service
+        Before=omada.service
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/firewall-cmd --permanent --add-service=omada
+        ExecStart=/usr/bin/firewall-cmd --reload
+
+        [Install]
+        WantedBy=multi-user.target

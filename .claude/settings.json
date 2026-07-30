@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/terraform-check.sh",
+            "timeout": 90,
+            "statusMessage": "Running terraform fmt/validate/tflint/trivy..."
+          }
+        ]
+      }
+    ]
+  }
+}

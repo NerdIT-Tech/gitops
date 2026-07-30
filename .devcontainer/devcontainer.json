@@ -1,0 +1,16 @@
+{
+    "image": "mcr.microsoft.com/devcontainers/base:0-ubuntu-22.04",
+    "features": {
+        "ghcr.io/devcontainers/features/terraform:1": {},
+        "ghcr.io/roul/devcontainer-features/bitwarden-cli:1": {},
+        "./features/claude-cache": {},
+        "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {},
+        "ghcr.io/devcontainers/features/aws-cli:1": {},
+        "ghcr.io/devcontainers-extra/features/tflint:1": {},
+        "ghcr.io/jasonthedeveloper/features/trivy:1": {},
+        "ghcr.io/devcontainers-extra/features/claude-code:1": {}
+    },
+    "mounts": [
+        "source=claude-code-cache-${devcontainerId},target=/home/vscode/.claude,type=volume"
+    ]
+}

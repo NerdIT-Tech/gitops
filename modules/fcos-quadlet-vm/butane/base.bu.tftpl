@@ -1,0 +1,63 @@
+variant: fcos
+version: 1.5.0
+
+passwd:
+  users:
+    - name: core
+      ssh_authorized_keys:
+        - ${ssh_authorized_key}
+      groups:
+        - wheel
+        - sudo
+
+storage:
+  links:
+    - path: /etc/localtime
+      target: /usr/share/zoneinfo/${timezone}
+
+  files:
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: ${hostname}
+
+    - path: /etc/zincati/config.d/90-update-strategy.toml
+      mode: 0644
+      contents:
+        inline: |
+          [updates]
+          strategy = "periodic"
+
+          [updates.periodic.window]
+          days = [ "sat", "sun" ]
+          start_time = "02:00"
+          length_minutes = 180
+
+systemd:
+  units:
+    - name: firewalld.service
+      enabled: true
+
+%{ if qemu_guest_agent_enabled ~}
+    - name: install-qemu-guest-agent.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Layer qemu-guest-agent and reboot if it was just installed
+        Wants=network-online.target
+        After=network-online.target
+        Before=zincati.service
+        ConditionPathExists=!/var/lib/%N.stamp
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/rpm-ostree install --apply-live --allow-inactive qemu-guest-agent
+        ExecStart=/usr/bin/systemctl enable qemu-guest-agent.service
+        ExecStart=/usr/bin/touch /var/lib/%N.stamp
+        ExecStartPost=/usr/bin/systemctl start qemu-guest-agent.service
+
+        [Install]
+        WantedBy=multi-user.target
+%{ endif ~}

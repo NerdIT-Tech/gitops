@@ -1,0 +1,159 @@
+name: Terraform PR
+
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - "**.tftpl"
+      - ".tflint.hcl"
+      - ".github/workflows/terraform-pr.yml"
+
+# use_lockfile (S3 native locking, backend.tf) already prevents concurrent
+# state corruption, but a plan and a future apply piling up on each other's
+# lock is still wasted CI time - keep runs serialized regardless.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.10.5" # >= 1.10 required for the S3 backend's use_lockfile
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  validate:
+    name: Format, validate, lint, scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      # Two independent roots: the module validates standalone (it declares
+      # its own required_providers in versions.tf), and the environment
+      # validates the module composed with real call-site values.
+      - name: terraform init (module, no backend)
+        working-directory: modules/fcos-quadlet-vm
+        run: terraform init -backend=false
+      - name: terraform validate (module)
+        working-directory: modules/fcos-quadlet-vm
+        run: terraform validate
+
+      # environments/homelab/<service>/ is its own Terraform root with its own
+      # state - one root per service (see ADR-0004), not one shared root for
+      # the whole environment. Add a block here per service as they're added;
+      # this'll want to become a matrix once there's more than a couple.
+      - name: terraform init (homelab/omada, no backend)
+        working-directory: environments/homelab/omada
+        run: terraform init -backend=false
+      - name: terraform validate (homelab/omada)
+        working-directory: environments/homelab/omada
+        run: terraform validate
+
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: latest
+      - name: tflint init
+        run: tflint --init
+      - name: tflint
+        run: tflint --recursive
+
+      - name: Trivy IaC scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+
+  plan:
+    name: Plan
+    needs: validate
+    # Proxmox and the MinIO state backend only live on the homelab's private
+    # network - a GitHub-hosted runner can't reach either, so this job needs
+    # a self-hosted runner with network access to both. Adjust the label(s)
+    # below to match your actual runner registration.
+    runs-on: [self-hosted, homelab]
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      # MinIO (S3-compatible) credentials for the state backend - backend.tf
+      # reads these from the standard AWS_* env vars.
+      AWS_ACCESS_KEY_ID: ${{ secrets.TF_MINIO_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_MINIO_SECRET_ACCESS_KEY }}
+      # Proxmox provider inputs - see environments/homelab/variables.tf.
+      TF_VAR_proxmox_endpoint: ${{ vars.TF_PROXMOX_ENDPOINT }}
+      TF_VAR_proxmox_username: ${{ vars.TF_PROXMOX_USERNAME }}
+      TF_VAR_proxmox_password: ${{ secrets.TF_PROXMOX_PASSWORD }}
+      TF_VAR_proxmox_ssh_username: ${{ vars.TF_PROXMOX_SSH_USERNAME }}
+      TF_VAR_proxmox_node: ${{ vars.TF_PROXMOX_NODE }}
+      TF_VAR_ssh_public_key: ${{ vars.TF_SSH_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Same one-root-per-service note as the validate job above.
+      - name: terraform init
+        working-directory: environments/homelab/omada
+        run: terraform init
+
+      - name: terraform plan
+        id: plan
+        working-directory: environments/homelab/omada
+        timeout-minutes: 5
+        run: terraform plan -no-color -input=false -out=tfplan
+        continue-on-error: true
+
+      # Saved so a merge of this PR can apply exactly what was reviewed
+      # here instead of re-planning after merge, once an apply workflow
+      # exists to consume it.
+      - name: Upload plan artifact
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan
+          path: environments/homelab/omada/tfplan
+          retention-days: 5
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v9
+        env:
+          PLAN_OUTPUT: ${{ steps.plan.outputs.stdout }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+        with:
+          script: |
+            const marker = "<!-- terraform-plan -->";
+            const outcome = process.env.PLAN_OUTCOME;
+            const output = process.env.PLAN_OUTPUT || "(no output captured)";
+            const body = `${marker}\n### Terraform Plan (\`${outcome}\`)\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
