@@ -15,5 +15,9 @@ override.tf.json
 # OS / editor cruft
 .DS_Store
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # Claude Code - personal/local overrides, not shared with the team
 .claude/settings.local.json
