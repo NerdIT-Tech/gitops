@@ -12,14 +12,20 @@ storage:
 
   files:
     # Podman secret seed - root-only. gha-runner-secret.service loads this
-    # into a podman secret before the runner container starts, so the PAT
-    # isn't a plain `Environment=` value (visible via `podman inspect`).
-    # It still exists in cleartext here and in the rendered Ignition config
-    # uploaded to the Proxmox snippet datastore - see ADR-0005.
-    - path: /etc/gha-runner/pat
+    # into a podman secret before the runner container starts, so the App
+    # private key isn't a plain `Environment=` value (visible via
+    # `podman inspect`). It still exists in cleartext here and in the
+    # rendered Ignition config uploaded to the Proxmox snippet datastore -
+    # see ADR-0005.
+    - path: /etc/gha-runner/app-private-key.pem
       mode: 0600
       contents:
-        inline: ${github_runner_pat}
+        # A PEM key is multi-line - a plain single-line inline value would
+        # only work for single-line values and breaks YAML parsing here.
+        # This needs a block scalar with the interpolated content
+        # re-indented to match.
+        inline: |
+          ${indent(10, github_app_private_key)}
 
     - path: /etc/containers/systemd/gha-runner.container
       mode: 0644
@@ -36,9 +42,12 @@ storage:
           ContainerName=gha-runner
           AutoUpdate=registry
 
-          Secret=gha_runner_pat,type=env,target=ACCESS_TOKEN
+          Secret=gha_runner_app_key,type=env,target=APP_PRIVATE_KEY
+          Environment=APP_ID=${github_app_id}
           Environment=RUNNER_NAME=%H
           Environment=REPO_URL=https://github.com/${github_repo}
+          # APP_LOGIN is left unset - the entrypoint derives it from
+          # REPO_URL's owner segment for RUNNER_SCOPE=repo.
           Environment=RUNNER_SCOPE=repo
           Environment=LABELS=${runner_labels}
           Environment=RUNNER_WORKDIR=/_work
@@ -66,13 +75,13 @@ systemd:
       enabled: true
       contents: |
         [Unit]
-        Description=Seed the podman secret backing the GitHub runner's ACCESS_TOKEN
+        Description=Seed the podman secret backing the GitHub runner's APP_PRIVATE_KEY
         Before=gha-runner.service
 
         [Service]
         Type=oneshot
         RemainAfterExit=yes
-        ExecStart=/usr/bin/podman secret create --replace gha_runner_pat /etc/gha-runner/pat
+        ExecStart=/usr/bin/podman secret create --replace gha_runner_app_key /etc/gha-runner/app-private-key.pem
 
         [Install]
         WantedBy=multi-user.target

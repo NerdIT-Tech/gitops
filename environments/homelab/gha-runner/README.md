@@ -7,22 +7,33 @@ for why it's built this way. **This is the one thing in this repo that
 cannot be applied via CI** - the `plan` job needs this runner to already
 exist, so the first apply has to happen locally, by hand, once.
 
-## 1. Create the GitHub PAT
+## 1. Create and install the GitHub App
 
-The runner container uses a PAT to mint its own registration token at
-startup (so it survives restarts without manual re-registration - see
-ADR-0005). Create one scoped as narrowly as GitHub allows for runner
-registration:
+The runner container authenticates as a GitHub App rather than a PAT (see
+ADR-0005) - the App's private key mints its own short-lived installation
+token at startup, so it survives restarts without manual re-registration
+and without a long-lived user-bound credential.
 
-- **Fine-grained PAT** (preferred): repository access limited to
-  `NerdIT-Tech/gitops`, permission **Administration: Read and write**.
-- **Classic PAT** (if fine-grained doesn't work for your GitHub plan):
-  scope `repo`.
+1. **Settings → Developer settings → GitHub Apps → New GitHub App**, under
+   the `NerdIT-Tech` org.
+2. No webhook needed - uncheck "Active" under Webhook, or point it
+   anywhere disposable; this App is only used for its installation token,
+   never for receiving events.
+3. **Repository permissions → Administration: Read and write** - this is
+   the permission the runner registration API requires, same as it would
+   for a PAT.
+4. Create the App, then **Generate a private key** on its settings page -
+   downloads a `.pem` file. This is `github_app_private_key`.
+5. Note the **App ID** shown on the same page - this is `github_app_id`
+   (not sensitive; it's visible on the App's public page).
+6. **Install the App** on the `NerdIT-Tech` org, scoped to (at minimum) the
+   `gitops` repository.
 
-Don't commit this anywhere. You'll pass it as a Terraform variable in step 3
-*and* set it as a repo secret (`TF_GITHUB_RUNNER_PAT`) so CI's own `plan`
-job for this service - which runs on the very runner this PAT bootstraps -
-can also plan changes to it.
+Don't commit the private key anywhere. You'll pass it as a Terraform
+variable in step 3 *and* set it as a repo secret (`TF_GITHUB_APP_PRIVATE_KEY`,
+plus `TF_GITHUB_APP_ID` as a repo **variable**, not secret) so CI's own
+`plan` job for this service - which runs on the very runner this App
+bootstraps - can also plan changes to it.
 
 ## 2. Gather the other required values
 
@@ -31,7 +42,10 @@ committed `.tfvars`:
 
 - `TF_VAR_proxmox_endpoint`, `TF_VAR_proxmox_password`, `TF_VAR_proxmox_node`
 - `TF_VAR_ssh_public_key`
-- `TF_VAR_github_runner_pat` - the PAT from step 1
+- `TF_VAR_github_app_id` - the App ID from step 1
+- `TF_VAR_github_app_private_key` - the full `.pem` file contents (real
+  newlines - `export TF_VAR_github_app_private_key="$(cat path/to/key.pem)"`
+  works fine)
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` for the MinIO state backend
 
 `github_repo`, `runner_labels`, and `runner_image_tag` all have defaults in
@@ -61,8 +75,8 @@ labels `self-hosted` and `homelab`. If it's not showing up:
 podman logs gha-runner
 ```
 
-A common cause is the PAT lacking the Administration permission (or
-`repo` scope for classic PATs) needed to call the runner registration API.
+A common cause is the App lacking the Administration permission, or not
+being installed on this repo, needed to call the runner registration API.
 
 ## 5. Confirm CI can actually schedule on it
 
@@ -71,10 +85,10 @@ Open any PR that touches a `.tf` or `.tftpl` file. The `plan` job in
 queued, double check the runner's labels match `runs-on: [self-hosted,
 homelab]` exactly.
 
-## Rotating the PAT
+## Regenerating the App's private key
 
 ```
-export TF_VAR_github_runner_pat=<new PAT>
+export TF_VAR_github_app_private_key="$(cat path/to/new-key.pem)"
 terraform apply
 ```
 
@@ -82,12 +96,15 @@ This updates the Ignition-seeded file, but **not** the live podman secret
 the running container is using - that's only re-seeded by
 `gha-runner-secret.service` on boot. Reboot the VM (or manually run
 `systemctl restart gha-runner-secret.service && systemctl restart
-gha-runner.service` on it) after rotating.
+gha-runner.service` on it) after regenerating. Remember to update the
+`TF_GITHUB_APP_PRIVATE_KEY` repo secret too, so CI's `plan` job keeps
+working.
 
 ## Troubleshooting
 
 - **Runner never comes online**: `podman logs gha-runner` on the VM first.
-  Most failures here are PAT scope/permission issues, not infra issues.
+  Most failures here are App permission/installation issues, not infra
+  issues.
 - **Runner shows up but jobs never start**: check `LABELS` actually applied
   (`podman inspect gha-runner`) matches what `terraform-pr.yml` expects.
 - **VM won't boot / Ignition errors**: same fingerprint-drift caveat as

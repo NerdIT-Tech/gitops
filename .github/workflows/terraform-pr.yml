@@ -106,10 +106,12 @@ jobs:
       TF_VAR_proxmox_ssh_username: ${{ vars.TF_PROXMOX_SSH_USERNAME }}
       TF_VAR_proxmox_node: ${{ vars.TF_PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.TF_SSH_PUBLIC_KEY }}
-      # gha-runner-only input. Terraform silently ignores TF_VAR_* env vars
-      # that don't match a declared variable, so this is a harmless no-op
-      # for every other service in the matrix.
-      TF_VAR_github_runner_pat: ${{ secrets.TF_GITHUB_RUNNER_PAT }}
+      # gha-runner-only inputs (GitHub App auth, not a PAT - ADR-0005).
+      # Terraform silently ignores TF_VAR_* env vars that don't match a
+      # declared variable, so these are harmless no-ops for every other
+      # service in the matrix.
+      TF_VAR_github_app_id: ${{ vars.TF_GITHUB_APP_ID }}
+      TF_VAR_github_app_private_key: ${{ secrets.TF_GITHUB_APP_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4

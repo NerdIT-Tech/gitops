@@ -22,27 +22,45 @@ outside this repo's IaC.
 
 Three sub-decisions worth calling out:
 
-**Registration via PAT (`ACCESS_TOKEN`), not a manual registration token.**
+**Registration via a GitHub App (`APP_ID`/`APP_PRIVATE_KEY`), not a PAT.**
 GitHub's manual registration tokens (from the "Add runner" UI) expire in
 about an hour - useless for a declarative config that might not boot
-immediately, and useless after any restart. `ACCESS_TOKEN` (a GitHub PAT)
-lets the container mint a fresh registration token itself on every start,
-so `Restart=always` and VM reboots don't require any manual
-re-registration step.
+immediately, and useless after any restart. A PAT-backed `ACCESS_TOKEN`
+would solve that (the container mints a fresh registration token itself on
+every start), but a GitHub App does the same thing without a long-lived
+user-bound credential: the App's private key mints short-lived
+installation tokens itself, matching `infra-terraform`'s ADR-0001
+("Authenticate to GitHub as a GitHub App, not a PAT") instead of
+introducing this repo's only PAT. The runner image
+(`myoung34/github-runner`) supports this directly via `APP_ID` +
+`APP_PRIVATE_KEY`; its entrypoint derives `APP_LOGIN` from `REPO_URL`'s
+owner segment for `RUNNER_SCOPE=repo`, so repo-scoped registration works
+the same way it would with a PAT - confirmed by reading the entrypoint
+script directly, since the image's own README doesn't document repo-scope
+App auth explicitly. The App needs the **Administration: Read and write**
+repository permission (same permission a PAT/fine-grained-PAT would need
+for the same registration-token endpoint) and must be installed on
+`NerdIT-Tech` (org-level install, or scoped to just the `gitops` repo).
 
-**The PAT goes through a podman secret, not a plain `Environment=`.**
-`gha-runner-secret.service` seeds a podman secret from an Ignition-written
-file (`/etc/gha-runner/pat`, mode 0600) before the runner container starts;
-the Quadlet unit references it via `Secret=gha_runner_pat,type=env,...`
-rather than putting the PAT directly in `Environment=`. This keeps it out
-of `podman inspect`'s plain environment listing. It does **not** remove the
-PAT from the rendered Ignition config uploaded to the Proxmox snippet
+**The private key goes through a podman secret, not a plain
+`Environment=`.** `gha-runner-secret.service` seeds a podman secret from
+an Ignition-written file (`/etc/gha-runner/app-private-key.pem`, mode
+0600) before the runner container starts; the Quadlet unit references it
+via `Secret=gha_runner_app_key,type=env,target=APP_PRIVATE_KEY` rather
+than putting the key directly in `Environment=`. This keeps it out of
+`podman inspect`'s plain environment listing. It does **not** remove the
+key from the rendered Ignition config uploaded to the Proxmox snippet
 datastore, or from Terraform state - both still hold it in cleartext, same
 exposure level as everything else in this repo, which already treats
-Proxmox root access as the trust boundary (ADR-0001). This is the first
-place in the repo a real credential (not just an SSH public key) is baked
-into Ignition content; flagging that explicitly rather than leaving it
-implicit.
+Proxmox root access as the trust boundary (ADR-0001 in this repo). This is
+the first place in this repo a real credential (not just an SSH public
+key) is baked into Ignition content; flagging that explicitly rather than
+leaving it implicit. Rendering it required a real fix, not just a design
+note: a PEM key is multi-line, so the Butane template uses a YAML block
+scalar with Terraform's `indent()` function
+(`inline: |` / `${indent(10, github_app_private_key)}`) rather than a
+plain single-line `inline: ${...}` value, which would have produced
+invalid YAML the moment a real multi-line key was substituted in.
 
 **The image tag floats, it isn't pinned.** Unlike Omada
 (`docker.io/mbentley/omada-controller:5.15`, a real semver release),
@@ -67,8 +85,13 @@ fight with container-level auto-update as the update mechanism.
   be the one asset in the homelab Proxmox environment not managed as code,
   and would still need this repo's own module to provision on Proxmox
   anyway.
-- **Manual registration token instead of `ACCESS_TOKEN`** — rejected; see
-  Decision. Incompatible with `Restart=always` and reboot survival.
+- **Manual registration token** — rejected; see Decision. Incompatible with
+  `Restart=always` and reboot survival.
+- **PAT-backed `ACCESS_TOKEN`** — the image's other supported auth method,
+  and functionally fine, but rejected in favor of a GitHub App to match
+  `infra-terraform`'s established convention and avoid a long-lived
+  user-bound credential when the image supports the App-based alternative
+  natively.
 - **Ephemeral runner mode** (`EPHEMERAL=true`, one job then deregister) —
   not used. This is a single always-on runner for a low-volume homelab CI
   workflow; ephemeral mode is aimed at autoscaling fleets, which doesn't
@@ -83,11 +106,14 @@ fight with container-level auto-update as the update mechanism.
   `environments/homelab/gha-runner/README.md` for the runbook. Every
   *subsequent* change to this service's config can go through the normal
   PR flow once the runner is up.
-- Rotating `github_runner_pat` requires a new `terraform apply` (updates
-  the Ignition-seeded file) **and** a reboot or restart of
-  `gha-runner-secret.service` on the VM to re-seed the podman secret - a
-  live `apply` alone does not rotate the credential the running container
-  is using. Not automated; a known gap, not a design goal here.
+- Regenerating `github_app_private_key` (e.g. on suspected compromise)
+  requires a new `terraform apply` (updates the Ignition-seeded file)
+  **and** a reboot or restart of `gha-runner-secret.service` on the VM to
+  re-seed the podman secret - a live `apply` alone does not rotate the key
+  the running container is using. Not automated; a known gap, not a design
+  goal here. In exchange, day-to-day operation needs no rotation at all -
+  installation tokens the App mints are short-lived and refreshed
+  automatically, unlike a PAT that would need periodic manual renewal.
 - If the runner VM goes down, every PR touching `.tf`/`.tftpl` files is
   blocked on the `plan` job (which can't schedule anywhere) until it's back
   - this repo now has exactly the kind of infrastructure-depends-on-itself

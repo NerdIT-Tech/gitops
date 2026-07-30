@@ -36,8 +36,13 @@ variable "github_repo" {
   default     = "NerdIT-Tech/gitops"
 }
 
-variable "github_runner_pat" {
-  description = "GitHub PAT (classic: repo scope, or fine-grained: Administration read/write) used to mint the runner's registration token at container start. See environments/homelab/gha-runner/README.md."
+variable "github_app_id" {
+  description = "GitHub App ID used to mint the runner's registration token at container start (App auth, not a PAT - see ADR-0005). Not sensitive on its own; shown on the App's public settings page."
+  type        = string
+}
+
+variable "github_app_private_key" {
+  description = "GitHub App private key (full PEM contents, real newlines - not the \\n-escaped form). See environments/homelab/gha-runner/README.md for setup."
   type        = string
   sensitive   = true
 }

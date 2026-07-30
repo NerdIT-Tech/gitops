@@ -14,12 +14,13 @@ module "gha_runner" {
 
   extra_butane_snippets = [
     templatefile("${path.module}/../../../services/gha-runner/butane/gha-runner.bu.tftpl", {
-      github_repo       = var.github_repo
-      github_runner_pat = var.github_runner_pat
-      runner_labels     = var.runner_labels
-      runner_image_tag  = var.runner_image_tag
-      container_puid    = 509
-      container_pgid    = 509
+      github_repo            = var.github_repo
+      github_app_id          = var.github_app_id
+      github_app_private_key = var.github_app_private_key
+      runner_labels          = var.runner_labels
+      runner_image_tag       = var.runner_image_tag
+      container_puid         = 509
+      container_pgid         = 509
     })
   ]
 }
