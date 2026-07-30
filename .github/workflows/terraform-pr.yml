@@ -9,8 +9,8 @@ on:
       - ".github/workflows/terraform-pr.yml"
 
 # use_lockfile (S3 native locking, backend.tf) already prevents concurrent
-# state corruption, but a plan and a future apply piling up on each other's
-# lock is still wasted CI time - keep runs serialized regardless.
+# state corruption, but plans for different services piling up on each
+# other's lock is still wasted CI time - keep runs serialized regardless.
 concurrency:
   group: terraform-state
   cancel-in-progress: false
@@ -20,8 +20,8 @@ env:
   TF_IN_AUTOMATION: "true"
 
 jobs:
-  validate:
-    name: Format, validate, lint, scan
+  lint:
+    name: Format, lint, scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -31,27 +31,6 @@ jobs:
 
       - name: terraform fmt
         run: terraform fmt -check -recursive -diff
-
-      # Two independent roots: the module validates standalone (it declares
-      # its own required_providers in versions.tf), and the environment
-      # validates the module composed with real call-site values.
-      - name: terraform init (module, no backend)
-        working-directory: modules/fcos-quadlet-vm
-        run: terraform init -backend=false
-      - name: terraform validate (module)
-        working-directory: modules/fcos-quadlet-vm
-        run: terraform validate
-
-      # environments/homelab/<service>/ is its own Terraform root with its own
-      # state - one root per service (see ADR-0004), not one shared root for
-      # the whole environment. Add a block here per service as they're added;
-      # this'll want to become a matrix once there's more than a couple.
-      - name: terraform init (homelab/omada, no backend)
-        working-directory: environments/homelab/omada
-        run: terraform init -backend=false
-      - name: terraform validate (homelab/omada)
-        working-directory: environments/homelab/omada
-        run: terraform validate
 
       - uses: terraform-linters/setup-tflint@v6
         with:
@@ -69,13 +48,48 @@ jobs:
           exit-code: "1"
           severity: "CRITICAL,HIGH"
 
+  validate:
+    name: Validate (${{ matrix.root }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every standalone Terraform root in the repo: the module itself
+        # (it declares its own required_providers in versions.tf) plus one
+        # entry per service root (ADR-0004: one root per service, not one
+        # shared environment root). Add a line here for every new service.
+        root:
+          - modules/fcos-quadlet-vm
+          - environments/homelab/omada
+          - environments/homelab/gha-runner
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init (no backend)
+        working-directory: ${{ matrix.root }}
+        run: terraform init -backend=false
+      - name: terraform validate
+        working-directory: ${{ matrix.root }}
+        run: terraform validate
+
   plan:
-    name: Plan
-    needs: validate
+    name: Plan (${{ matrix.service }})
+    needs: [lint, validate]
+    strategy:
+      fail-fast: false
+      matrix:
+        # Service roots only - modules/fcos-quadlet-vm has no state of its
+        # own to plan. Add a line here for every new service.
+        service: [omada, gha-runner]
     # Proxmox and the MinIO state backend only live on the homelab's private
     # network - a GitHub-hosted runner can't reach either, so this job needs
     # a self-hosted runner with network access to both. Adjust the label(s)
-    # below to match your actual runner registration.
+    # below to match your actual runner registration. (This is also the
+    # runner provisioned by the gha-runner service being planned in this
+    # same matrix - see ADR-0005 for the bootstrap chicken-and-egg note.)
     runs-on: [self-hosted, homelab]
     permissions:
       contents: read
@@ -85,27 +99,30 @@ jobs:
       # reads these from the standard AWS_* env vars.
       AWS_ACCESS_KEY_ID: ${{ secrets.TF_MINIO_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_MINIO_SECRET_ACCESS_KEY }}
-      # Proxmox provider inputs - see environments/homelab/variables.tf.
+      # Proxmox provider inputs - see environments/homelab/*/variables.tf.
       TF_VAR_proxmox_endpoint: ${{ vars.TF_PROXMOX_ENDPOINT }}
       TF_VAR_proxmox_username: ${{ vars.TF_PROXMOX_USERNAME }}
       TF_VAR_proxmox_password: ${{ secrets.TF_PROXMOX_PASSWORD }}
       TF_VAR_proxmox_ssh_username: ${{ vars.TF_PROXMOX_SSH_USERNAME }}
       TF_VAR_proxmox_node: ${{ vars.TF_PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.TF_SSH_PUBLIC_KEY }}
+      # gha-runner-only input. Terraform silently ignores TF_VAR_* env vars
+      # that don't match a declared variable, so this is a harmless no-op
+      # for every other service in the matrix.
+      TF_VAR_github_runner_pat: ${{ secrets.TF_GITHUB_RUNNER_PAT }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Same one-root-per-service note as the validate job above.
       - name: terraform init
-        working-directory: environments/homelab/omada
+        working-directory: environments/homelab/${{ matrix.service }}
         run: terraform init
 
       - name: terraform plan
         id: plan
-        working-directory: environments/homelab/omada
+        working-directory: environments/homelab/${{ matrix.service }}
         timeout-minutes: 5
         run: terraform plan -no-color -input=false -out=tfplan
         continue-on-error: true
@@ -117,8 +134,8 @@ jobs:
         if: steps.plan.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
-          name: tfplan
-          path: environments/homelab/omada/tfplan
+          name: tfplan-${{ matrix.service }}
+          path: environments/homelab/${{ matrix.service }}/tfplan
           retention-days: 5
 
       - name: Comment plan on PR
@@ -126,12 +143,14 @@ jobs:
         env:
           PLAN_OUTPUT: ${{ steps.plan.outputs.stdout }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          SERVICE: ${{ matrix.service }}
         with:
           script: |
-            const marker = "<!-- terraform-plan -->";
+            const service = process.env.SERVICE;
+            const marker = `<!-- terraform-plan:${service} -->`;
             const outcome = process.env.PLAN_OUTCOME;
             const output = process.env.PLAN_OUTPUT || "(no output captured)";
-            const body = `${marker}\n### Terraform Plan (\`${outcome}\`)\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>`;
+            const body = `${marker}\n### Terraform Plan: \`${service}\` (\`${outcome}\`)\n<details><summary>Show plan</summary>\n\n\`\`\`\n${output}\n\`\`\`\n\n</details>`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,

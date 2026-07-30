@@ -1,0 +1,78 @@
+variant: fcos
+version: 1.5.0
+
+storage:
+  directories:
+    - path: /var/lib/gha-runner/work
+      mode: 0750
+      user:
+        id: ${container_puid}
+      group:
+        id: ${container_pgid}
+
+  files:
+    # Podman secret seed - root-only. gha-runner-secret.service loads this
+    # into a podman secret before the runner container starts, so the PAT
+    # isn't a plain `Environment=` value (visible via `podman inspect`).
+    # It still exists in cleartext here and in the rendered Ignition config
+    # uploaded to the Proxmox snippet datastore - see ADR-0005.
+    - path: /etc/gha-runner/pat
+      mode: 0600
+      contents:
+        inline: ${github_runner_pat}
+
+    - path: /etc/containers/systemd/gha-runner.container
+      mode: 0644
+      contents:
+        inline: |
+          [Unit]
+          Description=GitHub Actions self-hosted runner (${github_repo})
+          After=network-online.target gha-runner-secret.service
+          Wants=network-online.target
+          Requires=gha-runner-secret.service
+
+          [Container]
+          Image=docker.io/myoung34/github-runner:${runner_image_tag}
+          ContainerName=gha-runner
+          AutoUpdate=registry
+
+          Secret=gha_runner_pat,type=env,target=ACCESS_TOKEN
+          Environment=RUNNER_NAME=%H
+          Environment=REPO_URL=https://github.com/${github_repo}
+          Environment=RUNNER_SCOPE=repo
+          Environment=LABELS=${runner_labels}
+          Environment=RUNNER_WORKDIR=/_work
+          # Redeploying the container (via the auto-update timer pulling a
+          # fresh nightly image, ADR-0005) is how this runner picks up a
+          # newer actions/runner binary - disable the image's own in-place
+          # self-update so those two mechanisms don't fight each other.
+          Environment=DISABLE_AUTO_UPDATE=true
+
+          Volume=/var/lib/gha-runner/work:/_work:Z
+
+          [Service]
+          Restart=always
+          TimeoutStartSec=300
+
+          [Install]
+          WantedBy=multi-user.target
+
+systemd:
+  units:
+    - name: podman-auto-update.timer
+      enabled: true
+
+    - name: gha-runner-secret.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Seed the podman secret backing the GitHub runner's ACCESS_TOKEN
+        Before=gha-runner.service
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/podman secret create --replace gha_runner_pat /etc/gha-runner/pat
+
+        [Install]
+        WantedBy=multi-user.target
