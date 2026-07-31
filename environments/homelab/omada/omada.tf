@@ -5,7 +5,7 @@ module "omada" {
   ssh_public_key = var.ssh_public_key
 
   vm_id   = 9010
-  vm_name = "omada-controller"
+  vm_name = "omada01"
 
   vm_cpu_cores    = 2
   vm_memory_mb    = 2048
