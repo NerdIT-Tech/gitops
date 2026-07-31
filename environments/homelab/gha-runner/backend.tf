@@ -15,7 +15,7 @@ terraform {
     # copy-pasting this file for a new service, change this key first -
     # forgetting to means the new service silently shares state with (and
     # can clobber) whatever this key currently points at.
-    key          = "gitops/omada/terraform.tfstate"
+    key          = "gitops/gha-runner/terraform.tfstate"
     region       = "us-east-1"
     use_lockfile = true
   }

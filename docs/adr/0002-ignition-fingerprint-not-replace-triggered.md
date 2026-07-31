@@ -6,11 +6,12 @@
 
 Ignition applies once, on first boot. If `extra_butane_snippets` or
 `butane/base.bu.tftpl` change for an already-provisioned VM, Terraform will
-happily re-render and re-upload the `.ign` snippet, but the running VM
-never sees it — Ignition does not re-run on reboot. Left unaddressed, this
-drift is silent: `terraform plan` shows the snippet resource updating and
-nothing else, giving no signal that the *running* VM is now out of sync
-with the repo.
+happily re-render the config, rebuild the custom install ISO, and upload
+it (see [ADR-0007](0007-kvm-arguments-requires-root-pam.md) for how
+Ignition is delivered), but the running VM never sees it — Ignition does
+not re-run on reboot. Left unaddressed, this drift is silent: `terraform
+plan` shows the ISO-build/upload resources updating and nothing else,
+giving no signal that the *running* VM is now out of sync with the repo.
 
 The VMs this module provisions are stateful, single-instance appliances
 (e.g. Omada, with its controller data on the VM's own disk). Automatically

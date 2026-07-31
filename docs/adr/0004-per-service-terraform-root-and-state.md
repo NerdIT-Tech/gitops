@@ -53,11 +53,10 @@ longer a shared root-level `.tf` file at `environments/homelab/` itself.
   `.claude/hooks/terraform-check.sh` PostToolUse hook both run
   `fmt`/`validate`/`plan` scoped to the specific service root that changed,
   not the whole environment.
-- CI's validate/plan steps are currently hardcoded to
-  `environments/homelab/omada` (there's only one service). This needs to
-  become a matrix (or a duplicated block per service) the next time a
-  service is added — noted inline in the workflow file. The local hook
-  script does not have this limitation: it derives the root generically
+- CI's validate/plan steps became a matrix (`matrix.root` / `matrix.service`
+  in `terraform-pr.yml`) once the second service (`gha-runner`) was added -
+  each new service needs one line added to those matrix lists. The local
+  hook script never had this limitation: it derives the root generically
   from the edited file's path, so it needs no changes as services are
   added, as long as `environments/homelab/<name>/` and `services/<name>/`
   keep using matching names.

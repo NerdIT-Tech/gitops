@@ -2,6 +2,13 @@
 
 **Status:** Accepted **Date:** 2026-07-30 (retroactively documented; predates this ADR log)
 
+**Refined by [ADR-0006](0006-scoped-api-token-plus-ssh-key.md)**: the
+"scoped API token can't work" conclusion below was imprecisely framed -
+SSH is unavoidable for snippet upload specifically, independent of API
+auth method. This repo now uses a scoped API token for the API surface and
+a dedicated SSH key (not root's password) for the SSH surface. Left as-is
+below for the historical record of what was actually tried first and why.
+
 ## Context
 
 The `bpg/proxmox` provider needs two distinct access paths to stand up an

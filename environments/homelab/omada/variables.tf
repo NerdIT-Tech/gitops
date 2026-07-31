@@ -2,19 +2,10 @@ variable "proxmox_endpoint" {
   type = string
 }
 
-variable "proxmox_username" {
-  type    = string
-  default = "root@pam"
-}
-
-variable "proxmox_password" {
-  type      = string
-  sensitive = true
-}
-
-variable "proxmox_ssh_username" {
-  type    = string
-  default = "root"
+variable "proxmox_api_token" {
+  description = "Proxmox API token, format user@realm!token-id=secret. Needs enough role permissions for VM lifecycle + image/ISO upload + datastore operations - see ADR-0007."
+  type        = string
+  sensitive   = true
 }
 
 variable "proxmox_insecure" {
