@@ -35,16 +35,16 @@ storage:
           Environment=PUID=${container_puid}
           Environment=PGID=${container_pgid}
           Environment=TZ=${timezone}
-          Environment=MANAGE_HTTP_PORT=8088
-          Environment=MANAGE_HTTPS_PORT=8043
-          Environment=PORTAL_HTTP_PORT=8088
-          Environment=PORTAL_HTTPS_PORT=8843
+          Environment=MANAGE_HTTP_PORT=${manage_http_port}
+          Environment=MANAGE_HTTPS_PORT=${manage_https_port}
+          Environment=PORTAL_HTTP_PORT=${portal_http_port}
+          Environment=PORTAL_HTTPS_PORT=${portal_https_port}
           Environment=SHOW_SERVER_LOGS=true
 
           Volume=/var/lib/omada/data:/opt/tplink/EAPController/data:Z
           Volume=/var/lib/omada/logs:/opt/tplink/EAPController/logs:Z
 
-          HealthCmd=curl -k -f https://localhost:8043
+          HealthCmd=curl -k -f https://localhost:${manage_https_port}
           HealthInterval=30s
           HealthTimeout=10s
           HealthRetries=3
@@ -64,10 +64,9 @@ storage:
           <service>
             <short>Omada Controller</short>
             <description>TP-Link Omada SDN Controller management and discovery ports</description>
-            <port protocol="tcp" port="8088"/>
-            <port protocol="tcp" port="8043"/>
-            <port protocol="tcp" port="8843"/>
-            <port protocol="tcp" port="29814"/>
+%{ for port in tcp_ports ~}
+            <port protocol="tcp" port="${port}"/>
+%{ endfor ~}
             <port protocol="udp" port="29810"/>
             <port protocol="udp" port="29811"/>
             <port protocol="udp" port="29812"/>

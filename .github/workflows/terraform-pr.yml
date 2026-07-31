@@ -54,12 +54,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every standalone Terraform root in the repo: the module itself
-        # (it declares its own required_providers in versions.tf) plus one
-        # entry per service root (ADR-0004: one root per service, not one
-        # shared environment root). Add a line here for every new service.
+        # Every standalone Terraform root in the repo: each module (they
+        # declare their own required_providers, or lack thereof, in their
+        # own versions.tf - modules/omada intentionally has none, see
+        # ADR-0008) plus one entry per service root (ADR-0004: one root per
+        # service, not one shared environment root). Add a line here for
+        # every new module or service.
         root:
           - modules/fcos-quadlet-vm
+          - modules/omada
           - environments/homelab/omada
           - environments/homelab/gha-runner
     steps:
