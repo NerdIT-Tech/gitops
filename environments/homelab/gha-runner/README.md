@@ -21,7 +21,16 @@ and without a long-lived user-bound credential.
    never for receiving events.
 3. **Repository permissions → Administration: Read and write** - this is
    the permission the runner registration API requires, same as it would
-   for a PAT.
+   for a PAT. If you're changing this on an **already-installed** App
+   (not setting it during initial creation), it does not take effect
+   automatically - GitHub holds it as a pending permission-upgrade request
+   that the org has to separately approve, at
+   `github.com/organizations/NerdIT-Tech/settings/installations/<id>`
+   (look for a "permissions requested" prompt). Confirm the change actually
+   landed with `gh api orgs/NerdIT-Tech/installations -q
+   '.installations[] | select(.app_id==<id>) | .permissions'` - the App's
+   own settings page will show the permission as configured even while
+   the live installation still hasn't been upgraded to grant it.
 4. Create the App, then **Generate a private key** on its settings page -
    downloads a `.pem` file. This is `github_app_private_key`.
 5. Note the **App ID** shown on the same page - this is `github_app_id`
@@ -42,22 +51,29 @@ committed `.tfvars`:
 
 - `TF_VAR_proxmox_endpoint`, `TF_VAR_proxmox_node`
 - `TF_VAR_proxmox_api_token` - scoped Proxmox API token
-  (`user@realm!token-id=secret`), not root's password - see ADR-0006
-- `TF_VAR_proxmox_ssh_private_key` - the SSH private key (PEM, real
-  newlines) for the SSH fallback snippet upload needs - a separate
-  credential from the API token
+  (`user@realm!token-id=secret`), not root's password - see ADR-0007. No
+  SSH credential needed - that ADR covers why.
 - `TF_VAR_ssh_public_key`
 - `TF_VAR_github_app_id` - the App ID from step 1
 - `TF_VAR_github_app_private_key` - the full `.pem` file contents (real
   newlines - `export TF_VAR_github_app_private_key="$(cat path/to/key.pem)"`
   works fine)
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` for the MinIO state backend
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` for the S3 state backend
 
 `github_repo`, `runner_labels`, and `runner_image_tag` all have defaults in
 `variables.tf` that should already be correct for this repo - override only
 if you're pointing this at something else.
 
 ## 3. Apply locally
+
+Requires `coreos-installer` on whatever machine runs `terraform apply` -
+the module's `custom_iso_build` step shells out to it to embed Ignition
+into an install ISO (see [ADR-0007](../../../docs/adr/0007-kvm-arguments-requires-root-pam.md)).
+No prebuilt static binary is published upstream:
+
+```
+cargo install coreos-installer --locked
+```
 
 ```
 cd environments/homelab/gha-runner
@@ -107,9 +123,20 @@ working.
 
 ## Troubleshooting
 
-- **Runner never comes online**: `podman logs gha-runner` on the VM first.
-  Most failures here are App permission/installation issues, not infra
-  issues.
+- **Runner never comes online**: `podman logs gha-runner` (or `journalctl
+  -u gha-runner` if you don't have a plain SSH login handy - see the module
+  README for why `qm guest exec` can't run these) on the VM first. Most
+  failures here are App permission/installation issues, not infra issues.
+- **`Invalid configuration provided for token` in the runner logs, or a
+  `curl: (22) ... 403` during deregistration**: the GitHub App's JWT/
+  installation-token exchange is working (you'll see "Access token
+  refreshed successfully" in the logs), but the actual registration- or
+  removal-token API call is being rejected - almost always the App missing
+  **Administration: Read and write**, or that permission being set on the
+  App but not yet approved for this installation (see step 1.3 above).
+  After fixing, `sudo systemctl reset-failed gha-runner.service &&
+  sudo systemctl restart gha-runner.service` - it won't retry on its own
+  once systemd's restart-rate-limit kicks in.
 - **Runner shows up but jobs never start**: check `LABELS` actually applied
   (`podman inspect gha-runner`) matches what `terraform-pr.yml` expects.
 - **VM won't boot / Ignition errors**: same fingerprint-drift caveat as
@@ -117,3 +144,13 @@ working.
   [module README](../../../modules/fcos-quadlet-vm/README.md)'s rebuild
   runbook if you're re-applying config changes to an already-provisioned
   runner VM, not just the first bootstrap.
+- **`terraform apply` fails uploading the custom ISO with HTTP 413**: if
+  Proxmox sits behind a reverse proxy (not just `pveproxy` directly), check
+  its body-size limit - e.g. nginx defaults to ~1MB, nowhere near enough
+  for a ~1GB FCOS ISO. Needs `client_max_body_size 0;` (or a large explicit
+  value) in whichever server block actually matches the hostname in
+  `proxmox_endpoint` - a proxy can have multiple server blocks on the same
+  port, and the wrong one silently keeps the old limit even after you think
+  you've fixed it. Confirm which block is live with `curl -skI
+  https://<endpoint>/ | grep server` and check for a second reverse proxy
+  in the path if the limit still isn't taking effect.

@@ -2,6 +2,16 @@
 
 **Status:** Accepted **Date:** 2026-07-31
 
+**Superseded by [ADR-0007](0007-kvm-arguments-requires-root-pam.md)** for
+the API-token half: setting `kvm_arguments`/`args` turns out to be
+hardcoded to root@pam password auth in Proxmox itself, regardless of token
+scope - discovered on the first real `terraform apply` after this ADR was
+written. ADR-0007's redesign (ISO-embedded Ignition instead of `-fw_cfg`)
+also removes the `ssh{}` block this ADR introduced entirely, not just its
+credential type. Left as-is below for the historical record - the
+API-token reasoning here was reasonable given what was verified at the
+time, just incomplete.
+
 **Refines [ADR-0001](0001-root-pam-password-proxmox-auth.md)**, which this
 repo started with (`root@pam` + a single shared password for both the API
 and SSH surfaces). That decision's core technical premise was correct but
@@ -66,6 +76,23 @@ Consequence ADR-0001 flagged but didn't act on yet.
   role right is Proxmox-instance-specific and wasn't verified here -
   expect to iterate on the role/permissions the first time `terraform
   apply` actually runs against it.
+- The SSH user does **not** need to be `root` either - confirmed against
+  the `bpg/proxmox` provider's own docs. It can be a dedicated non-root
+  Linux user (e.g. `gh-deploy`), but note this is a **separate identity**
+  from the API token's realm user (`gh-deploy@pve` or similar) - a real
+  system account on the Proxmox host with its own `authorized_keys`, not
+  a Proxmox API/PAM realm concept. It needs passwordless `sudo` scoped to
+  exactly the commands the provider shells out to, added via
+  `visudo -f /etc/sudoers.d/terraform`:
+  ```
+  gh-deploy ALL=(root) NOPASSWD: /usr/sbin/pvesm
+  gh-deploy ALL=(root) NOPASSWD: /usr/sbin/qm
+  gh-deploy ALL=(root) NOPASSWD: /usr/bin/tee /var/lib/vz/snippets/[a-zA-Z0-9_][a-zA-Z0-9_.-]*
+  ```
+  The `tee` rule must stay scoped to the snippets path pattern shown -
+  the docs explicitly warn a wildcard like `/var/lib/vz/*` is a path
+  traversal risk. If snippets live on a non-default datastore, that
+  path needs its own rule too.
 - `proxmox_username`/`proxmox_password` variables are gone from every
   service root (`environments/homelab/*/variables.tf`) - replaced with
   `proxmox_api_token` and `proxmox_ssh_private_key`, both `sensitive`.

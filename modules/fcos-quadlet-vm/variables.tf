@@ -12,16 +12,6 @@ variable "vm_datastore_id" {
   default = "local-lvm"
 }
 
-variable "snippet_datastore_id" {
-  type    = string
-  default = "local"
-}
-
-variable "snippet_fs_path" {
-  type    = string
-  default = "/var/lib/vz/snippets"
-}
-
 variable "fcos_stream" {
   type    = string
   default = "stable"
