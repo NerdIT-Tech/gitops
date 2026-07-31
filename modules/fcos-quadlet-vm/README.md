@@ -18,12 +18,18 @@ Provisions a single Fedora CoreOS VM on Proxmox, bootstrapped via Ignition
 3. Uploads the merged Ignition config as a Proxmox snippet and boots the VM
    with it wired in via `kvm_arguments` (`-fw_cfg ... opt/com.coreos/config`).
 
-## Why root@pam + password, not an API token
+## Why SSH is still required despite using an API token
 
-Proxmox API tokens can't be scoped to cover this module's snippet-upload
-path, so both the API and SSH auth in the environment's `providers.tf` use
-`root@pam` + password. See [ADR-0001](../../docs/adr/0001-root-pam-password-proxmox-auth.md)
-for the full rationale and alternatives considered.
+Proxmox's snippet-upload operation (how this module gets the rendered
+Ignition config onto the node before `kvm_arguments` points the VM at it)
+requires SSH regardless of how the API itself is authenticated - a scoped
+API token works fine for everything else this module does. The
+environment's `providers.tf` therefore uses a scoped API token for the API
+surface and a dedicated SSH key (not a password, and not the same
+credential as the token) for the SSH surface. See
+[ADR-0006](../../docs/adr/0006-scoped-api-token-plus-ssh-key.md) for the
+full rationale, and [ADR-0001](../../docs/adr/0001-root-pam-password-proxmox-auth.md)
+for the earlier root@pam+password setup this refined.
 
 ## Ignition-only-runs-once, and what that means for edits
 

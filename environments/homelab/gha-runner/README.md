@@ -40,7 +40,12 @@ bootstraps - can also plan changes to it.
 Same as every other service here - these come from env vars, never a
 committed `.tfvars`:
 
-- `TF_VAR_proxmox_endpoint`, `TF_VAR_proxmox_password`, `TF_VAR_proxmox_node`
+- `TF_VAR_proxmox_endpoint`, `TF_VAR_proxmox_node`
+- `TF_VAR_proxmox_api_token` - scoped Proxmox API token
+  (`user@realm!token-id=secret`), not root's password - see ADR-0006
+- `TF_VAR_proxmox_ssh_private_key` - the SSH private key (PEM, real
+  newlines) for the SSH fallback snippet upload needs - a separate
+  credential from the API token
 - `TF_VAR_ssh_public_key`
 - `TF_VAR_github_app_id` - the App ID from step 1
 - `TF_VAR_github_app_private_key` - the full `.pem` file contents (real

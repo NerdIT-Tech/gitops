@@ -100,10 +100,11 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.TF_MINIO_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_MINIO_SECRET_ACCESS_KEY }}
       # Proxmox provider inputs - see environments/homelab/*/variables.tf.
+      # Scoped API token + SSH key, not root@pam + password - ADR-0006.
       TF_VAR_proxmox_endpoint: ${{ vars.TF_PROXMOX_ENDPOINT }}
-      TF_VAR_proxmox_username: ${{ vars.TF_PROXMOX_USERNAME }}
-      TF_VAR_proxmox_password: ${{ secrets.TF_PROXMOX_PASSWORD }}
+      TF_VAR_proxmox_api_token: ${{ secrets.TF_PROXMOX_API_TOKEN }}
       TF_VAR_proxmox_ssh_username: ${{ vars.TF_PROXMOX_SSH_USERNAME }}
+      TF_VAR_proxmox_ssh_private_key: ${{ secrets.TF_PROXMOX_SSH_PRIVATE_KEY }}
       TF_VAR_proxmox_node: ${{ vars.TF_PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.TF_SSH_PUBLIC_KEY }}
       # gha-runner-only inputs (GitHub App auth, not a PAT - ADR-0005).
