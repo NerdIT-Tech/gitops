@@ -3,10 +3,18 @@ data "http" "fcos_stream" {
 }
 
 locals {
-  fcos_metadata  = jsondecode(data.http.fcos_stream.response_body)
-  fcos_live_iso  = local.fcos_metadata.architectures.x86_64.artifacts.metal.formats.iso.disk
-  fcos_version   = local.fcos_metadata.architectures.x86_64.artifacts.metal.release
-  build_dir      = pathexpand("~/.cache/fcos-quadlet-vm")
+  fcos_metadata = jsondecode(data.http.fcos_stream.response_body)
+  fcos_live_iso = local.fcos_metadata.architectures.x86_64.artifacts.metal.formats.iso.disk
+  fcos_version  = local.fcos_metadata.architectures.x86_64.artifacts.metal.release
+  # /_work is the gha-runner container's only volume that survives a
+  # restart/image pull (RUNNER_WORKDIR, see
+  # services/gha-runner/butane/gha-runner.bu.tftpl) - built ISOs must live
+  # there too, not under $HOME, or a recycled runner loses a previously
+  # built ISO that terraform_data.custom_iso_build (below) still considers
+  # up to date (its triggers_replace didn't change, so it won't rebuild)
+  # while a resource referencing that same file gets replaced for an
+  # unrelated reason and fails reading a file that's no longer there.
+  build_dir      = "/_work/.cache/fcos-quadlet-vm"
   custom_iso_dir = "${local.build_dir}/${var.vm_name}"
 }
 
@@ -62,6 +70,12 @@ resource "terraform_data" "custom_iso_build" {
   triggers_replace = {
     fingerprint  = terraform_data.ignition_fingerprint.output
     fcos_version = local.fcos_version
+    # The local-exec provisioner below only re-runs when triggers_replace
+    # changes - it isn't re-run just because an environment= value like
+    # OUTPUT_ISO changed. Without this, moving build_dir (or renaming the
+    # VM) would leave source_file.custom_iso pointing at a path this
+    # script never actually wrote to.
+    output_iso = "${local.custom_iso_dir}/${var.vm_name}-${substr(terraform_data.ignition_fingerprint.output, 0, 12)}.iso"
   }
 
   provisioner "local-exec" {
