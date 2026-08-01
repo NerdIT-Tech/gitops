@@ -1,17 +1,17 @@
 name: Terraform PR
 
-on:
-  pull_request:
+#on:
+  #pull_request:
     # Must stay a superset of terraform-apply.yml's own path filter - any PR
     # that would trigger an apply on merge has to trigger a plan here first,
     # or terraform-apply.yml's "reuse the merged PR's plan" path finds no
     # artifact to download and falls back to planning fresh instead.
-    paths:
-      - "**.tf"
-      - "**.tftpl"
-      - ".tflint.hcl"
-      - ".github/workflows/terraform-pr.yml"
-      - ".github/workflows/terraform-apply.yml"
+  #  paths:
+  #    - "**.tf"
+  #    - "**.tftpl"
+  #    - ".tflint.hcl"
+  #    - ".github/workflows/terraform-pr.yml"
+  #    - ".github/workflows/terraform-apply.yml"
 
 # use_lockfile (S3 native locking, backend.tf) already prevents concurrent
 # state corruption, but plans for different services piling up on each

@@ -2,7 +2,7 @@ name: Terraform Apply
 
 on:
   push:
-    branches: [main]
+    #branches: [main]
     # Must stay a subset of terraform-pr.yml's own path filter - the inverse
     # invariant terraform-pr.yml's own comment calls out: any push that
     # would trigger an apply here has to have already triggered a plan
@@ -313,7 +313,7 @@ jobs:
           # $PORKBUN_API_KEY/$PORKBUN_API_SECRET expand HERE, locally, into
           # ssh's stdin, not on the remote end.
           ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" \
-            "sudo install -d -m 0700 \$(dirname '$CREDENTIALS_FILE') && sudo install -m 0600 /dev/stdin '$CREDENTIALS_FILE'" <<EOF
+            "sudo install -d -m 0755 \$(dirname '$CREDENTIALS_FILE') && sudo install -m 0600 /dev/stdin '$CREDENTIALS_FILE'" <<EOF
           dns_porkbun_key=$PORKBUN_API_KEY
           dns_porkbun_secret=$PORKBUN_API_SECRET
           EOF

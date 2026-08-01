@@ -170,5 +170,11 @@ resource "proxmox_virtual_environment_vm" "this" {
 
   stop_on_destroy = true
 
+  lifecycle {
+    replace_triggered_by = [
+      terraform_data.ignition_fingerprint,
+    ]
+  }
+
   depends_on = [proxmox_virtual_environment_file.custom_iso]
 }
