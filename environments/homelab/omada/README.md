@@ -28,33 +28,61 @@ inputs are unaffected.
 `module.omada_tls` ([`modules/porkbun-acme-tls`](../../../modules/porkbun-acme-tls),
 [ADR-0009](../../../docs/adr/0009-porkbun-dns01-acme-module.md)) issues and
 renews a Let's Encrypt certificate for `omada01.canady.cloud` +
-`omada.canady.cloud` via Porkbun DNS-01, entirely on-VM - no cert material
-passes through Terraform's own state as ACME provider resources (the
-Porkbun API key/secret do, though - see the module's README for that
-trade-off before setting `porkbun_api_key`/`porkbun_api_secret` here).
+`omada.canady.cloud` via Porkbun DNS-01, entirely on-VM. **No Porkbun
+credential of any kind passes through Terraform** - not state, not the
+rendered `.ign` file, not the install ISO, not CI's plan-comment output.
+This isn't a redaction claim, it's structural: `module.omada_tls` takes no
+credential input at all. See [ADR-0010](../../../docs/adr/0010-porkbun-credential-out-of-band.md)
+for why - a real Porkbun API secret leaked into a GitHub PR comment under
+this environment's original design, because Terraform's sensitivity marks
+didn't survive the `poseidon/ct` provider's Butane transpilation. That
+secret has been rotated and the leaked PR comment/artifact/run log purged;
+the fix here is the module no longer being able to leak what it never
+receives.
 
-Before enabling this on `omada01`:
+**How the credential actually reaches the VM**: `.github/workflows/terraform-apply.yml`'s
+`apply` job runs a dedicated step ("Seed Porkbun credentials on omada01")
+after `terraform apply` completes. It reads `PORKBUN_API_KEY`/`PORKBUN_API_SECRET`
+directly from GitHub Actions secrets into its own shell (never a
+`TF_VAR_*`, never seen by Terraform), waits for `omada01` to become
+reachable over SSH (first boot runs an unattended install + reboot that
+`terraform apply` doesn't wait for), writes the credentials file at
+`module.omada_tls.credentials_file`'s path (surfaced as this root's
+`omada_tls_credentials_file` output, default
+`/etc/porkbun-credentials/omada01.ini`), and explicitly starts
+`acme-omada01.service` then `omada.service` - the controller's own
+`Restart=always` loop will have already hit systemd's default start-limit
+and given up by the time this step runs, so it can't be left to retry
+this on its own. This step is idempotent and re-runs on every apply,
+including ones where nothing changed. Requires an `SSH_PRIVATE_KEY`
+secret in the `homelab` GitHub Actions environment, paired with the
+existing `vars.SSH_PUBLIC_KEY`.
 
-- **Confirm no certificate has ever been installed through `omada01`'s
-  controller web UI.** A UI-installed cert lives in MongoDB and silently
-  overrides the `/cert` volume method `module.omada_service`'s `enable_tls`
-  relies on.
-- **Confirm your Porkbun API key's blast radius.** Porkbun API keys are
-  account-wide by default (every domain on the account, not just
-  `canady.cloud`) - restrict it to known egress IPs in Porkbun's dashboard
-  if you can, since this key ends up embedded in Terraform state, the CI
-  runner's rendered `.ign` file, and the uploaded install ISO, not just on
-  `omada01` itself.
-- **Confirm the `nerdit-tech-terraform-state` S3 bucket has encryption at
-  rest enabled.** This change adds a live, reusable API credential to state
-  for the first time in this environment.
+**Before enabling this on `omada01`, as part of the rebuild runbook
+below:**
 
-`omada.service`'s first start is gated on a successful initial ACME
-issuance (`After=`/`Requires=` on `module.omada_tls.acme_service_name`) -
-first boot now depends on `omada01` reaching Porkbun's API and Let's
-Encrypt over the network. Renewals afterward are decoupled from that gate;
-a `systemd.path` unit restarts the controller only when the cert file
-actually changes.
+1. **Confirm no certificate has ever been installed through `omada01`'s
+   controller web UI.** A UI-installed cert lives in MongoDB and silently
+   overrides the `/cert` volume method `module.omada_service`'s
+   `enable_tls` relies on.
+2. **Confirm `SSH_PRIVATE_KEY`, `PORKBUN_API_KEY`, and `PORKBUN_API_SECRET`
+   are set in the `homelab` GitHub Actions environment** before merging -
+   without them the new CI step in `terraform-apply.yml` will fail after
+   `terraform apply` has already rebuilt the VM, leaving `omada.service`
+   stuck waiting on a credentials file nothing wrote.
+3. **Confirm your Porkbun API key's blast radius regardless.** Porkbun API
+   keys are account-wide by default (every domain on the account, not just
+   `canady.cloud`) - restrict it to known egress IPs in Porkbun's dashboard
+   if you can. Being kept out of Terraform doesn't change what the key can
+   do if `omada01` itself is compromised; it only removes the extra copies
+   Terraform would otherwise have made.
+
+`omada.service` is gated (`After=`/`Requires=`) on `acme-omada01.service`
+succeeding - fails closed by design, at the cost of first boot now
+depending on the CI step above completing successfully. Renewals after the
+first issuance are decoupled from that gate - a `systemd.path` unit
+restarts the controller only when the cert file actually changes, no CI
+involvement needed.
 
 ## This is a live, stateful production VM
 

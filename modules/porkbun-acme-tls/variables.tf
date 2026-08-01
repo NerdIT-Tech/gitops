@@ -18,16 +18,20 @@ variable "acme_email" {
   type        = string
 }
 
-variable "porkbun_api_key" {
-  description = "Porkbun API key (rendered as dns_porkbun_key in the on-VM credentials file). Porkbun API keys are account-wide, not scoped to a single domain - treat this with the same sensitivity as a full-registrar-account credential, not a per-service secret. It is embedded in the rendered Ignition config, which means it ends up in plaintext in Terraform state, the CI runner's rendered .ign file, and the uploaded install ISO - not just on the one VM that needs it. Restrict this key to known egress IPs in Porkbun's account dashboard if possible."
+variable "credentials_file" {
+  description = <<-EOT
+    Path on the VM (not the file's content - this module never sees or
+    renders the Porkbun API key/secret) to the certbot-dns-porkbun
+    credentials INI file (dns_porkbun_key=.../dns_porkbun_secret=...). This
+    module only creates the containing directory (mode 0700) and reads from
+    this path at runtime - the file itself must be written out-of-band
+    (e.g. over SSH) before the first issuance can succeed. Defaults to
+    /etc/porkbun-credentials/<cert_name>.ini (see main.tf) if left null.
+    See this module's README for why the credential is deliberately never
+    interpolated into Terraform-rendered content.
+  EOT
   type        = string
-  sensitive   = true
-}
-
-variable "porkbun_api_secret" {
-  description = "Porkbun API secret paired with porkbun_api_key (rendered as dns_porkbun_secret). Same exposure caveat as porkbun_api_key applies here."
-  type        = string
-  sensitive   = true
+  default     = null
 }
 
 variable "output_dir" {

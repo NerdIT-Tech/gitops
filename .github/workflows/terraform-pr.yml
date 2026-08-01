@@ -119,8 +119,9 @@ jobs:
       TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
       TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
-      TF_VAR_porkbun_api_key: ${{ secrets.PORKBUN_API_KEY }}
-      TF_VAR_porkbun_api_secret: ${{ secrets.PORKBUN_API_SECRET }}
+      # No TF_VAR_porkbun_api_key/secret here, deliberately - modules/porkbun-acme-tls
+      # takes no credential input at all (ADR-0010). Only acme_email
+      # (non-secret) is needed.
       TF_VAR_acme_email: ${{ vars.ACME_EMAIL }}
     steps:
       - uses: actions/checkout@v7

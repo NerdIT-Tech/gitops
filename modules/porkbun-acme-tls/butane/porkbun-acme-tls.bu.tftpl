@@ -13,15 +13,14 @@ storage:
         id: ${output_owner_uid}
       group:
         id: ${output_owner_gid}
+    # Contains the Porkbun credentials file, deliberately NOT created here -
+    # see this module's README/ADR-0010. Root-only permissions on the
+    # directory so it's ready for that file's 0600 content to land in,
+    # written out-of-band (SSH) before the first issuance can succeed.
+    - path: /etc/porkbun-credentials
+      mode: 0700
 
   files:
-    - path: /etc/porkbun-credentials/${cert_name}.ini
-      mode: 0600
-      contents:
-        inline: |
-          dns_porkbun_key=${porkbun_api_key}
-          dns_porkbun_secret=${porkbun_api_secret}
-
     - path: /usr/local/bin/acme-deploy-${cert_name}.sh
       mode: 0755
       contents:
@@ -50,7 +49,7 @@ systemd:
         ExecStart=/usr/bin/podman run --rm \
           -v /var/lib/acme/${cert_name}/letsencrypt:/etc/letsencrypt:Z \
           -v /var/lib/acme/${cert_name}/log:/var/log/letsencrypt:Z \
-          -v /etc/porkbun-credentials/${cert_name}.ini:/conf/porkbun.ini:ro \
+          -v ${credentials_file}:/conf/porkbun.ini:ro \
           -v ${output_dir}:${output_dir}:Z \
           -v /usr/local/bin/acme-deploy-${cert_name}.sh:/usr/local/bin/acme-deploy-${cert_name}.sh:ro \
           ${certbot_image} \

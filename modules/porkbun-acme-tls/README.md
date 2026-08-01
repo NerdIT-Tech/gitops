@@ -4,23 +4,32 @@ Renders the Butane/Ignition snippet for an on-VM certbot renewal loop that
 obtains a Let's Encrypt certificate via DNS-01, using Porkbun's DNS API
 (the [`certbot-dns-porkbun`](https://github.com/infinityofspace/certbot_dns_porkbun)
 plugin, run as a container since Fedora CoreOS has no native Python/pip):
-a `0600` Porkbun credentials file, a oneshot `acme-<cert_name>.service` unit
-that runs `certbot certonly`, a twice-daily `acme-<cert_name>.timer`, and a
-`--deploy-hook` script that copies the renewed `fullchain.pem`/`privkey.pem`
-to a caller-chosen directory and ownership.
+an empty, root-only credentials directory, a oneshot `acme-<cert_name>.service`
+unit that runs `certbot certonly`, a twice-daily `acme-<cert_name>.timer`,
+and a `--deploy-hook` script that copies the renewed
+`fullchain.pem`/`privkey.pem` to a caller-chosen directory and ownership.
+
+**This module never sees the Porkbun API key/secret.** See "Why the
+credential is never a Terraform input" below before assuming you can just
+add `porkbun_api_key`/`porkbun_api_secret` variables back - a real Porkbun
+API secret leaked through exactly that design once already (ADR-0010).
 
 ## What this module is (and isn't)
 
 Same shape as [`modules/omada`](../omada) (see
 [ADR-0008](../../docs/adr/0008-decouple-omada-service-from-vm-provisioning.md)
 for the reasoning this mirrors, and
-[ADR-0009](../../docs/adr/0009-porkbun-dns01-acme-module.md) for why this
-capability is its own module rather than folded into `modules/omada`): **no
+[ADR-0009](../../docs/adr/0009-porkbun-dns01-acme-module.md)/[ADR-0010](../../docs/adr/0010-porkbun-credential-out-of-band.md)
+for why this capability is its own module rather than folded into
+`modules/omada`, and why it takes no credential input at all): **no
 resources, no data sources, no provider requirements.** It takes
-service-shaped inputs (which domains, whose credentials, where to write the
-result) and produces one output, `butane_snippet`, plus `acme_service_name`
-so a consuming service can order its own first start after a successful
-initial issuance. It has no opinion on what consumes the resulting cert.
+service-shaped inputs (which domains, where the credentials file lives on
+the VM, where to write the result) and produces `butane_snippet`,
+`acme_service_name` (so a consuming service can order its own first start
+after a successful initial issuance), and `credentials_file` (the path
+whoever/whatever delivers the credential - CI, a human - must write to,
+out-of-band from this module entirely). It has no opinion on what consumes
+the resulting cert, or on how the credential gets there.
 
 ## Why DNS-01 (not HTTP-01), and why certbot (not acme.sh)
 
@@ -45,22 +54,44 @@ certificates for genuinely independent hosts, compose this module twice
 with different `cert_name`s rather than growing this module to manage
 multiple lineages per instance.
 
-## The credential-exposure trade-off
+## Why the credential is never a Terraform input
 
-`porkbun_api_key`/`porkbun_api_secret` are `sensitive = true`, but sensitivity
-in Terraform only redacts CLI/plan output - it doesn't stop the values being
-interpolated into the rendered Butane/Ignition content in plaintext. That
-content lands in Terraform state, the CI runner's rendered `.ign` file, and
-(for `fcos-quadlet-vm` callers) the uploaded install ISO on Proxmox, in
-addition to the `0600` file on the VM itself where it's actually needed.
-This is the accepted cost of the "no cert material passes through a
-Terraform-side ACME/DNS provider" decision behind this module (see
-ADR-0009) - not a gap to fix later. Porkbun API keys are account-wide, not
-domain-scoped, which makes this a meaningfully bigger blast radius than
-this repo's other credentials (e.g. `ssh_authorized_key`, a public key with
-no secrecy requirement) - restrict the key to known egress IPs in Porkbun's
-dashboard if that's available to you, and treat its compromise as an
-account-wide incident, not a single-domain one.
+The original design took `porkbun_api_key`/`porkbun_api_secret` as
+`sensitive = true` Terraform variables and interpolated them into the
+rendered Butane content. That leaked a real Porkbun API secret in
+plaintext into a GitHub PR comment: `terraform-pr.yml`'s plan-comment step
+posts raw `terraform plan` stdout, and while Terraform's sensitivity marks
+correctly propagated through every *pure Terraform* hop (locals, module
+outputs, list literals), they did not survive `data.ct_config` (the
+`poseidon/ct` provider, which shells out to Butane to transpile the YAML
+into Ignition JSON) - a provider RPC boundary. Butane converts a
+`storage.files[].contents.inline:` block into a `source: "data:,..."`
+percent-encoded URI, a structurally new attribute Terraform's path-based
+mark propagation doesn't reach through, and `ct`'s schema doesn't declare
+that attribute sensitive. The result: `local_file.rendered_ignition` (and
+everything downstream of it - the install ISO build, the Proxmox upload)
+showed the credential in cleartext in `terraform plan` output, unredacted,
+in CI, in a PR comment. See [ADR-0010](../../docs/adr/0010-porkbun-credential-out-of-band.md)
+for the full incident writeup.
+
+The fix is structural, not "redact harder": **this module never receives
+the credential's value at all.** It only creates the empty
+`/etc/porkbun-credentials` directory and references `credentials_file`'s
+*path* in the certbot invocation. The actual `dns_porkbun_key=.../dns_porkbun_secret=...`
+content has to be written out-of-band - for `environments/homelab/omada`,
+that's a dedicated CI step (`terraform-apply.yml`'s "Seed Porkbun
+credentials on omada01") that reads the secret directly from GitHub
+Actions secrets and SSHes it to the VM after `terraform apply` completes,
+never through a `TF_VAR_*` or any file this module renders. This means
+`terraform plan`/`apply` output for this module is safe to post anywhere,
+including CI PR comments, unredacted - there's nothing sensitive left in
+it to leak, regardless of whether whatever delivers the credential is
+automated or manual.
+
+Porkbun API keys are account-wide, not domain-scoped - restrict the key to
+known egress IPs in Porkbun's dashboard if that's available to you, and
+treat its compromise as an account-wide incident, not a single-domain one,
+regardless of how it's delivered to the VM.
 
 ## Boot-order
 

@@ -9,8 +9,11 @@ module "omada_tls" {
   domain_names = ["omada01.canady.cloud", "omada.canady.cloud"]
   acme_email   = var.acme_email
 
-  porkbun_api_key    = var.porkbun_api_key
-  porkbun_api_secret = var.porkbun_api_secret
+  # No porkbun_api_key/porkbun_api_secret here, deliberately - this module
+  # takes no credential input at all. See ADR-0010: that value has to be
+  # written out-of-band (SSH) to module.omada_tls.credentials_file, never
+  # through Terraform. credentials_file is left at its default
+  # (/etc/porkbun-credentials/omada01.ini).
 
   # Must match module.omada_service's tls_cert_dir below - the environment
   # layer is the single point of truth for this path, not either module
@@ -73,4 +76,9 @@ output "omada_ipv4_addresses" {
 
 output "omada_ignition_fingerprint" {
   value = module.omada.ignition_fingerprint
+}
+
+output "omada_tls_credentials_file" {
+  description = "Path on omada01 where the Porkbun DNS-01 credentials INI must be written out-of-band (SSH) before module.omada_tls.acme_service_name can succeed - see this environment's README."
+  value       = module.omada_tls.credentials_file
 }

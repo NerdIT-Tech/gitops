@@ -1,6 +1,19 @@
 # ADR-0009: Porkbun DNS-01 ACME as a reusable module, decoupled from Omada
 
-**Status:** Accepted **Date:** 2026-08-01
+**Status:** Accepted, partially superseded by [ADR-0010](0010-porkbun-credential-out-of-band.md) **Date:** 2026-08-01
+
+> **2026-08-01, same day:** the "Inputs" bullet below (`porkbun_api_key`/`porkbun_api_secret`
+> as module inputs) and the entire "accepted credential-exposure trade-off"
+> section were the actual design that shipped in this ADR's first version -
+> and that design leaked a real Porkbun API secret into a GitHub PR comment
+> within hours, because the "trade-off" assumed Terraform's sensitivity
+> marks would at least keep the value out of CI output, and they didn't
+> survive the `poseidon/ct` provider boundary. ADR-0010 replaces that part
+> of this decision: the module now takes no credential input at all. Left
+> the rest of this ADR (module boundary, certbot choice, DNS-01 reasoning,
+> restart-trigger design, boot-order) unchanged below as the accurate
+> historical record of what was decided and why - only the credential
+> handling was wrong.
 
 ## Context
 

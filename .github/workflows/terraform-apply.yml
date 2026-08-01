@@ -79,8 +79,9 @@ jobs:
       TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
       TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
-      TF_VAR_porkbun_api_key: ${{ secrets.PORKBUN_API_KEY }}
-      TF_VAR_porkbun_api_secret: ${{ secrets.PORKBUN_API_SECRET }}
+      # No TF_VAR_porkbun_api_key/secret here, deliberately - modules/porkbun-acme-tls
+      # takes no credential input at all (ADR-0010). Only acme_email
+      # (non-secret) is needed.
       TF_VAR_acme_email: ${{ vars.ACME_EMAIL }}
       SOURCE_PR: ${{ needs.resolve-pr.outputs.pr-number }}
     steps:
@@ -184,8 +185,9 @@ jobs:
       TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
       TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
-      TF_VAR_porkbun_api_key: ${{ secrets.PORKBUN_API_KEY }}
-      TF_VAR_porkbun_api_secret: ${{ secrets.PORKBUN_API_SECRET }}
+      # No TF_VAR_porkbun_api_key/secret here, deliberately - modules/porkbun-acme-tls
+      # takes no credential input at all (ADR-0010). Only acme_email
+      # (non-secret) is needed.
       TF_VAR_acme_email: ${{ vars.ACME_EMAIL }}
     steps:
       - uses: actions/checkout@v7
@@ -238,6 +240,88 @@ jobs:
       - name: terraform apply
         working-directory: environments/homelab/${{ matrix.service }}
         run: terraform apply -input=false -auto-approve tfplan
+
+      # Delivers the Porkbun DNS-01 credentials directly over SSH from this
+      # job to the VM - never through Terraform/Butane (ADR-0010: that's
+      # exactly the path that leaked a real secret into a PR comment,
+      # because Terraform's sensitivity marks don't survive the
+      # poseidon/ct provider's Butane transpilation). PORKBUN_API_KEY/
+      # PORKBUN_API_SECRET are read directly from GitHub Actions secrets
+      # into this step's env and never appear in `terraform plan`/`apply`
+      # output - GitHub's own log redaction (which masks registered
+      # `secrets.*` values verbatim, not derived/reshaped values the way
+      # Terraform's mark propagation failed to) is the only thing standing
+      # between this value and the log, so avoid transforming it (base64,
+      # URL-encoding, etc.) anywhere in this step.
+      #
+      # Hardcoded to omada01/matrix.service == 'omada' for now, matching
+      # this workflow's existing single-entry service matrix - generalize
+      # (e.g. read a per-service credentials-file output/secret pair) if a
+      # second porkbun-acme-tls consumer is ever added here.
+      - name: Seed Porkbun credentials on omada01
+        if: matrix.service == 'omada'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
+          PORKBUN_API_SECRET: ${{ secrets.PORKBUN_API_SECRET }}
+        working-directory: environments/homelab/${{ matrix.service }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+
+          CREDENTIALS_FILE="$(terraform output -raw omada_tls_credentials_file)"
+
+          # module.omada.ipv4_addresses is one address list per NIC
+          # (bpg/proxmox's qemu-guest-agent report), including loopback -
+          # take the first non-loopback, non-link-local address reported.
+          OMADA_IP="$(terraform output -json omada_ipv4_addresses \
+            | jq -r '[.[][] | select((startswith("127.") or startswith("fe80:") or . == "::1") | not)][0]')"
+          if [ -z "$OMADA_IP" ] || [ "$OMADA_IP" = "null" ]; then
+            echo "No usable IP reported for omada01 - cannot seed credentials." >&2
+            exit 1
+          fi
+
+          SSH_OPTS="-i $KEY_FILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
+
+          # terraform apply only waits for the Proxmox API call and the
+          # guest agent's IP report, not the full unattended
+          # coreos-installer install + reboot cycle that follows it - retry
+          # until sshd on the actually-installed OS answers.
+          connected=false
+          for _ in $(seq 1 60); do
+            if ssh $SSH_OPTS core@"$OMADA_IP" true 2>/dev/null; then
+              connected=true
+              break
+            fi
+            sleep 10
+          done
+          if [ "$connected" != true ]; then
+            echo "omada01 ($OMADA_IP) never became reachable over SSH." >&2
+            exit 1
+          fi
+
+          ssh $SSH_OPTS core@"$OMADA_IP" \
+            "sudo install -d -m 0700 \$(dirname '$CREDENTIALS_FILE') && sudo install -m 0600 /dev/stdin '$CREDENTIALS_FILE'" <<EOF
+          dns_porkbun_key=$PORKBUN_API_KEY
+          dns_porkbun_secret=$PORKBUN_API_SECRET
+          EOF
+
+          # omada.service (Requires=acme-omada01.service) will have already
+          # tried and failed to start at boot, before this step got a
+          # chance to write the credentials file above - and with
+          # systemd's default StartLimitBurst=5/StartLimitIntervalSec=10,
+          # its own Restart=always will have hit the start-limit and given
+          # up within the first few seconds, long before this step's SSH
+          # retry loop finishes. Drive the retry explicitly instead of
+          # relying on that loop: clear the failed/rate-limited state and
+          # start both units in order now that the credentials they needed
+          # actually exist. A no-op (both already active) on any run where
+          # the VM was already up and healthy.
+          ssh $SSH_OPTS core@"$OMADA_IP" \
+            'sudo systemctl reset-failed acme-omada01.service omada.service 2>/dev/null; sudo systemctl start acme-omada01.service && sudo systemctl start omada.service'
 
   # The PR's sticky per-service plan comment (from terraform-pr.yml) has now
   # been applied and is no longer useful - remove it rather than leave

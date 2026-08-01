@@ -21,18 +21,6 @@ variable "ssh_public_key" {
   type = string
 }
 
-variable "porkbun_api_key" {
-  description = "Porkbun API key for omada01's DNS-01 ACME issuance. Account-wide, not domain-scoped - see modules/porkbun-acme-tls's README for the exposure trade-off this implies before setting it."
-  type        = string
-  sensitive   = true
-}
-
-variable "porkbun_api_secret" {
-  description = "Porkbun API secret paired with porkbun_api_key."
-  type        = string
-  sensitive   = true
-}
-
 variable "acme_email" {
   description = "Contact email for Let's Encrypt expiry/revocation notices on omada01's certificate."
   type        = string
