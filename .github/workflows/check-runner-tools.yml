@@ -7,7 +7,9 @@ name: Check runner tools
 # it. Safe to delete once that's confirmed one way or the other.
 
 on:
-  workflow_dispatch: {}
+  push:
+    paths:
+      - ".github/workflows/check-runner-tools.yml"
 
 jobs:
   check:
