@@ -284,7 +284,7 @@ jobs:
             exit 1
           fi
 
-          SSH_OPTS="-i $KEY_FILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5)
 
           # terraform apply only waits for the Proxmox API call and the
           # guest agent's IP report, not the full unattended
@@ -292,7 +292,7 @@ jobs:
           # until sshd on the actually-installed OS answers.
           connected=false
           for _ in $(seq 1 60); do
-            if ssh $SSH_OPTS core@"$OMADA_IP" true 2>/dev/null; then
+            if ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" true 2>/dev/null; then
               connected=true
               break
             fi
@@ -303,7 +303,12 @@ jobs:
             exit 1
           fi
 
-          ssh $SSH_OPTS core@"$OMADA_IP" \
+          # \$(dirname ...) is deliberately escaped so it expands on the
+          # remote side (the directory already exists via Ignition, this is
+          # belt-and-suspenders) - and EOF is deliberately left unquoted so
+          # $PORKBUN_API_KEY/$PORKBUN_API_SECRET expand HERE, locally, into
+          # ssh's stdin, not on the remote end.
+          ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" \
             "sudo install -d -m 0700 \$(dirname '$CREDENTIALS_FILE') && sudo install -m 0600 /dev/stdin '$CREDENTIALS_FILE'" <<EOF
           dns_porkbun_key=$PORKBUN_API_KEY
           dns_porkbun_secret=$PORKBUN_API_SECRET
@@ -320,7 +325,7 @@ jobs:
           # start both units in order now that the credentials they needed
           # actually exist. A no-op (both already active) on any run where
           # the VM was already up and healthy.
-          ssh $SSH_OPTS core@"$OMADA_IP" \
+          ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" \
             'sudo systemctl reset-failed acme-omada01.service omada.service 2>/dev/null; sudo systemctl start acme-omada01.service && sudo systemctl start omada.service'
 
   # The PR's sticky per-service plan comment (from terraform-pr.yml) has now
