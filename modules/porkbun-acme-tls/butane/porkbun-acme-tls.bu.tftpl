@@ -1,0 +1,83 @@
+variant: fcos
+version: 1.5.0
+
+storage:
+  directories:
+    - path: /var/lib/acme/${cert_name}/letsencrypt
+      mode: 0700
+    - path: /var/lib/acme/${cert_name}/log
+      mode: 0700
+    - path: ${output_dir}
+      mode: 0750
+      user:
+        id: ${output_owner_uid}
+      group:
+        id: ${output_owner_gid}
+
+  files:
+    - path: /etc/porkbun-credentials/${cert_name}.ini
+      mode: 0600
+      contents:
+        inline: |
+          dns_porkbun_key=${porkbun_api_key}
+          dns_porkbun_secret=${porkbun_api_secret}
+
+    - path: /usr/local/bin/acme-deploy-${cert_name}.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/sh
+          # Invoked by certbot as --deploy-hook, only on an actual
+          # issuance/renewal (not on every no-op timer tick). $RENEWED_LINEAGE
+          # is set by certbot itself to /etc/letsencrypt/live/${cert_name}.
+          set -eu
+          cp "$RENEWED_LINEAGE/fullchain.pem" "${output_dir}/${output_cert_filename}"
+          cp "$RENEWED_LINEAGE/privkey.pem" "${output_dir}/${output_key_filename}"
+          chown ${output_owner_uid}:${output_owner_gid} "${output_dir}/${output_cert_filename}" "${output_dir}/${output_key_filename}"
+
+systemd:
+  units:
+    - name: acme-${cert_name}.service
+      contents: |
+        [Unit]
+        Description=Request/renew Let's Encrypt cert for ${cert_name} via Porkbun DNS-01
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/podman run --rm \
+          -v /var/lib/acme/${cert_name}/letsencrypt:/etc/letsencrypt:Z \
+          -v /var/lib/acme/${cert_name}/log:/var/log/letsencrypt:Z \
+          -v /etc/porkbun-credentials/${cert_name}.ini:/conf/porkbun.ini:ro \
+          -v ${output_dir}:${output_dir}:Z \
+          -v /usr/local/bin/acme-deploy-${cert_name}.sh:/usr/local/bin/acme-deploy-${cert_name}.sh:ro \
+          ${certbot_image} \
+          certonly --authenticator dns-porkbun \
+            --dns-porkbun-credentials /conf/porkbun.ini \
+            --dns-porkbun-propagation-seconds 60 \
+            --non-interactive --agree-tos --email ${acme_email} \
+            --cert-name ${cert_name} \
+%{ for domain in domain_names ~}
+            -d ${domain} \
+%{ endfor ~}
+            --deploy-hook /usr/local/bin/acme-deploy-${cert_name}.sh
+
+    # Not `enabled: true` deliberately - this unit is pulled in either by a
+    # consuming service's Requires= (first issuance, blocking that
+    # service's own first start - see modules/omada's enable_tls) or by the
+    # timer below (renewal). It doesn't need its own boot-time enablement.
+    - name: acme-${cert_name}.timer
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Twice-daily renewal check for ${cert_name}
+
+        [Timer]
+        OnCalendar=*-*-* 00,12:00:00
+        RandomizedDelaySec=1h
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target

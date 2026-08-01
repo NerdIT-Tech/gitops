@@ -15,6 +15,14 @@ storage:
         id: ${container_puid}
       group:
         id: ${container_pgid}
+%{ if enable_tls ~}
+    - path: ${tls_cert_dir}
+      mode: 0750
+      user:
+        id: ${container_puid}
+      group:
+        id: ${container_pgid}
+%{ endif ~}
 
   files:
     - path: /etc/containers/systemd/omada.container
@@ -25,6 +33,10 @@ storage:
           Description=TP-Link Omada SDN Controller
           After=network-online.target
           Wants=network-online.target
+%{ if enable_tls ~}
+          After=${acme_service_name}
+          Requires=${acme_service_name}
+%{ endif ~}
 
           [Container]
           Image=docker.io/mbentley/omada-controller:${omada_image_tag}
@@ -43,6 +55,9 @@ storage:
 
           Volume=/var/lib/omada/data:/opt/tplink/EAPController/data:Z
           Volume=/var/lib/omada/logs:/opt/tplink/EAPController/logs:Z
+%{ if enable_tls ~}
+          Volume=${tls_cert_dir}:/cert:Z
+%{ endif ~}
 
           HealthCmd=curl -k -f https://localhost:${manage_https_port}
           HealthInterval=30s
@@ -95,3 +110,26 @@ systemd:
 
         [Install]
         WantedBy=multi-user.target
+%{ if enable_tls ~}
+
+    - name: omada-cert-reload.path
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Watch for a renewed Omada TLS cert
+
+        [Path]
+        PathModified=${tls_cert_dir}/tls.crt
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: omada-cert-reload.service
+      contents: |
+        [Unit]
+        Description=Restart Omada to pick up a renewed TLS cert
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/systemctl try-restart omada.service
+%{ endif ~}
