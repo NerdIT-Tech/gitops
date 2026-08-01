@@ -206,11 +206,29 @@ jobs:
         working-directory: environments/homelab/${{ matrix.service }}
         run: terraform init
 
-      # Requires coreos-installer on this runner (see ADR-0007 /
-      # modules/fcos-quadlet-vm/README.md) - the custom_iso_build resource
-      # shells out to it via local-exec whenever the Ignition fingerprint
-      # changes. Confirm it's actually installed on the gha-runner VM
-      # before relying on this job; ADR-0007 left this unresolved for CI.
+      # modules/fcos-quadlet-vm's custom_iso_build resource shells out to
+      # coreos-installer via local-exec whenever the Ignition fingerprint
+      # changes (ADR-0007) - confirmed not present on this runner, and no
+      # prebuilt binary exists upstream (checked coreos/coreos-installer's
+      # GitHub releases: only a vendored source tarball is published, same
+      # finding ADR-0007 made). /_work is this container's only volume that
+      # survives a restart/image pull (RUNNER_WORKDIR, see
+      # services/gha-runner/butane/gha-runner.bu.tftpl) - cache the build
+      # there so this only compiles once, not on every apply.
+      - name: Ensure coreos-installer is available
+        run: |
+          TOOLS_DIR=/_work/.tools
+          if [ -x "$TOOLS_DIR/bin/coreos-installer" ]; then
+            echo "coreos-installer already cached at $TOOLS_DIR/bin/coreos-installer"
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev libzstd-dev curl
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            . "$HOME/.cargo/env"
+            cargo install coreos-installer --locked --root "$TOOLS_DIR"
+          fi
+          echo "$TOOLS_DIR/bin" >> "$GITHUB_PATH"
+
       - name: terraform apply
         working-directory: environments/homelab/${{ matrix.service }}
         run: terraform apply -input=false -auto-approve tfplan
