@@ -291,15 +291,17 @@ jobs:
           # coreos-installer install + reboot cycle that follows it - retry
           # until sshd on the actually-installed OS answers.
           connected=false
+          last_err=""
           for _ in $(seq 1 60); do
-            if ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" true 2>/dev/null; then
+            if last_err="$(ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" true 2>&1)"; then
               connected=true
               break
             fi
             sleep 10
           done
           if [ "$connected" != true ]; then
-            echo "omada01 ($OMADA_IP) never became reachable over SSH." >&2
+            echo "omada01 ($OMADA_IP) never became reachable over SSH. Last error:" >&2
+            echo "$last_err" >&2
             exit 1
           fi
 
