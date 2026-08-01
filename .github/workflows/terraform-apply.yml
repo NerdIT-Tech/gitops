@@ -262,7 +262,7 @@ jobs:
         if: matrix.service == 'omada'
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
+          PORKBUN_API_KEY: ${{ vars.PORKBUN_API_KEY }}
           PORKBUN_API_SECRET: ${{ secrets.PORKBUN_API_SECRET }}
         working-directory: environments/homelab/${{ matrix.service }}
         run: |
