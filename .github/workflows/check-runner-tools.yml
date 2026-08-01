@@ -1,0 +1,35 @@
+name: Check runner tools
+
+# Diagnostic-only, workflow_dispatch so it never runs unattended: confirms
+# whether coreos-installer (needed by modules/fcos-quadlet-vm's
+# custom_iso_build local-exec, see ADR-0007) is actually present on the
+# gha-runner VM before terraform-apply.yml's apply job comes to depend on
+# it. Safe to delete once that's confirmed one way or the other.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: [self-hosted, homelab]
+    steps:
+      - name: coreos-installer
+        run: |
+          if command -v coreos-installer >/dev/null 2>&1; then
+            echo "FOUND: $(coreos-installer --version)"
+            echo "PATH: $(command -v coreos-installer)"
+          else
+            echo "NOT FOUND on PATH"
+          fi
+      - name: cargo (fallback install path, ADR-0007)
+        run: |
+          if command -v cargo >/dev/null 2>&1; then
+            echo "FOUND: $(cargo --version)"
+          else
+            echo "NOT FOUND on PATH"
+          fi
+      - name: runner environment
+        run: |
+          echo "whoami: $(whoami)"
+          echo "os-release:"
+          cat /etc/os-release 2>/dev/null || echo "(no /etc/os-release)"
