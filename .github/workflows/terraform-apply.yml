@@ -1,0 +1,272 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    # Must stay a subset of terraform-pr.yml's own path filter - the inverse
+    # invariant terraform-pr.yml's own comment calls out: any push that
+    # would trigger an apply here has to have already triggered a plan
+    # there, or the "reuse the merged PR's plan" path below finds no
+    # artifact to download and falls back to a fresh plan instead (safe,
+    # just not what was reviewed).
+    paths:
+      - "**.tf"
+      - "**.tftpl"
+      - ".github/workflows/terraform-apply.yml"
+  workflow_dispatch: {}
+
+# Shared with terraform-pr.yml. State locking is handled natively by the S3
+# backend's `use_lockfile` conditional writes, so this is no longer the only
+# thing preventing corruption - kept anyway so a PR plan and an apply don't
+# pile up waiting on each other's lock.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.10.5" # >= 1.10 required for the S3 backend's use_lockfile
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # Identifies the merged PR (if any) behind this push, so `plan` can reuse
+  # the exact tfplan that was already reviewed on that PR instead of
+  # re-planning post-merge. Direct pushes to main and workflow_dispatch runs
+  # have no associated PR, so `plan` falls back to planning fresh for those.
+  resolve-pr:
+    name: Resolve merged PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr-number: ${{ steps.find.outputs.pr-number }}
+    steps:
+      - name: Find merged PR for this commit
+        id: find
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+            });
+            const match = prs.find((pr) => pr.merged_at && pr.merge_commit_sha === context.sha);
+            core.setOutput("pr-number", match ? String(match.number) : "");
+            core.info(match
+              ? `Reusing plan from PR #${match.number}`
+              : "No merged PR matched this commit; planning fresh.");
+
+  plan:
+    name: Plan (${{ matrix.service }})
+    needs: resolve-pr
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same set (and same gha-runner exclusion, ADR-0005) as
+        # terraform-pr.yml's own plan matrix - add a line here whenever a
+        # line is added there.
+        service: [omada]
+
+    runs-on: [self-hosted, homelab]
+    environment: homelab
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      TF_VAR_proxmox_endpoint: ${{ vars.PROXMOX_ENDPOINT }}
+      TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+      TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
+      TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
+      SOURCE_PR: ${{ needs.resolve-pr.outputs.pr-number }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Read-only role: this job only reads state (to refresh a fresh plan
+      # on the fallback path) and never writes it - only the apply job
+      # below gets write access.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.TF_AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: terraform init
+        working-directory: environments/homelab/${{ matrix.service }}
+        run: terraform init
+
+      # Reuse path: this push is a merge of a PR whose terraform-pr.yml run
+      # already produced a reviewed tfplan for this service. Download it
+      # instead of re-planning, so apply never runs anything that wasn't
+      # reviewed.
+      - name: Download plan from merged PR
+        if: env.SOURCE_PR != ''
+        uses: dawidd6/action-download-artifact@v21
+        with:
+          workflow: terraform-pr.yml
+          pr: ${{ env.SOURCE_PR }}
+          name: tfplan-${{ matrix.service }}
+          path: environments/homelab/${{ matrix.service }}
+          workflow_conclusion: success
+
+      # Fallback path: direct push to main or workflow_dispatch, with no
+      # merged PR to source a reviewed plan from.
+      - name: terraform plan (fresh)
+        id: plan
+        if: env.SOURCE_PR == ''
+        working-directory: environments/homelab/${{ matrix.service }}
+        timeout-minutes: 5
+        run: terraform plan -no-color -input=false -out=tfplan
+
+      # A plan step that's killed - by manual cancellation or by the
+      # timeout above - doesn't get to release its own S3 native lock,
+      # leaving the `.tflock` object behind and blocking every later
+      # plan/apply. `always()` so this runs on that path too; a normal
+      # success/failure already released the lock as part of terraform's
+      # own exit, so this is a harmless no-op then. Only relevant on the
+      # fresh-plan path - the reuse path never runs `terraform plan` here,
+      # so never takes the lock.
+      - name: Release state lock
+        if: always() && env.SOURCE_PR == ''
+        run: |
+          aws s3 rm "s3://nerdit-tech-terraform-state/gitops/${{ matrix.service }}/terraform.tfstate.tflock" \
+            --region us-east-1 || true
+
+      - name: Write plan to job summary
+        working-directory: environments/homelab/${{ matrix.service }}
+        run: |
+          {
+            if [ -n "$SOURCE_PR" ]; then
+              echo "### Terraform Plan: ${{ matrix.service }} (reused from PR #${SOURCE_PR})";
+            else
+              echo "### Terraform Plan: ${{ matrix.service }}";
+            fi
+            echo '```';
+            terraform show -no-color tfplan;
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Handed to the apply job as an artifact rather than re-downloading
+      # from the PR's run there, so apply always operates on exactly what
+      # this job just showed in the summary above - not on whatever the
+      # merged-PR artifact happens to hold by the time this job finishes.
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan-${{ matrix.service }}
+          path: environments/homelab/${{ matrix.service }}/tfplan
+          retention-days: 5
+          overwrite: true
+
+  apply:
+    name: Apply (${{ matrix.service }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [omada]
+
+    runs-on: [self-hosted, homelab]
+    environment: homelab
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      TF_VAR_proxmox_endpoint: ${{ vars.PROXMOX_ENDPOINT }}
+      TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+      TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
+      TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: tfplan-${{ matrix.service }}
+          path: environments/homelab/${{ matrix.service }}
+
+      # Read-write role: only this job ever gets S3 write access, and only
+      # after the plan job above (using the read-only role) has already
+      # produced or reused a reviewed plan.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.TF_AWS_APPLY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: terraform init
+        working-directory: environments/homelab/${{ matrix.service }}
+        run: terraform init
+
+      # modules/fcos-quadlet-vm's custom_iso_build resource shells out to
+      # coreos-installer via local-exec whenever the Ignition fingerprint
+      # changes (ADR-0007) - confirmed not present on this runner, and no
+      # prebuilt binary exists upstream (checked coreos/coreos-installer's
+      # GitHub releases: only a vendored source tarball is published, same
+      # finding ADR-0007 made). /_work is this container's only volume that
+      # survives a restart/image pull (RUNNER_WORKDIR, see
+      # services/gha-runner/butane/gha-runner.bu.tftpl) - cache the build
+      # there so this only compiles once, not on every apply.
+      - name: Ensure coreos-installer is available
+        run: |
+          TOOLS_DIR=/_work/.tools
+          if [ -x "$TOOLS_DIR/bin/coreos-installer" ]; then
+            echo "coreos-installer already cached at $TOOLS_DIR/bin/coreos-installer"
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev libzstd-dev curl
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            . "$HOME/.cargo/env"
+            cargo install coreos-installer --locked --root "$TOOLS_DIR"
+          fi
+          echo "$TOOLS_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: terraform apply
+        working-directory: environments/homelab/${{ matrix.service }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+  # The PR's sticky per-service plan comment (from terraform-pr.yml) has now
+  # been applied and is no longer useful - remove it rather than leave
+  # stale plan output sitting on a closed PR.
+  cleanup-pr-comment:
+    name: Remove sticky plan comment (${{ matrix.service }})
+    needs: [resolve-pr, apply]
+    if: needs.resolve-pr.outputs.pr-number != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [omada]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Delete sticky plan comment
+        uses: actions/github-script@v9
+        env:
+          PR_NUMBER: ${{ needs.resolve-pr.outputs.pr-number }}
+          SERVICE: ${{ matrix.service }}
+        with:
+          script: |
+            const marker = `<!-- terraform-plan:${process.env.SERVICE} -->`;
+            const issue_number = Number(process.env.PR_NUMBER);
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+              });
+            }

@@ -2,11 +2,16 @@ name: Terraform PR
 
 on:
   pull_request:
+    # Must stay a superset of terraform-apply.yml's own path filter - any PR
+    # that would trigger an apply on merge has to trigger a plan here first,
+    # or terraform-apply.yml's "reuse the merged PR's plan" path finds no
+    # artifact to download and falls back to planning fresh instead.
     paths:
       - "**.tf"
       - "**.tftpl"
       - ".tflint.hcl"
       - ".github/workflows/terraform-pr.yml"
+      - ".github/workflows/terraform-apply.yml"
 
 # use_lockfile (S3 native locking, backend.tf) already prevents concurrent
 # state corruption, but plans for different services piling up on each
@@ -54,12 +59,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every standalone Terraform root in the repo: the module itself
-        # (it declares its own required_providers in versions.tf) plus one
-        # entry per service root (ADR-0004: one root per service, not one
-        # shared environment root). Add a line here for every new service.
+        # Every standalone Terraform root in the repo: each module (they
+        # declare their own required_providers, or lack thereof, in their
+        # own versions.tf - modules/omada intentionally has none, see
+        # ADR-0008) plus one entry per service root (ADR-0004: one root per
+        # service, not one shared environment root). Add a line here for
+        # every new module or service.
         root:
           - modules/fcos-quadlet-vm
+          - modules/omada
           - environments/homelab/omada
           - environments/homelab/gha-runner
     steps:
@@ -82,41 +90,45 @@ jobs:
       fail-fast: false
       matrix:
         # Service roots only - modules/fcos-quadlet-vm has no state of its
-        # own to plan. Add a line here for every new service.
-        service: [omada, gha-runner]
-    # Proxmox and the MinIO state backend only live on the homelab's private
-    # network - a GitHub-hosted runner can't reach either, so this job needs
-    # a self-hosted runner with network access to both. Adjust the label(s)
-    # below to match your actual runner registration. (This is also the
-    # runner provisioned by the gha-runner service being planned in this
-    # same matrix - see ADR-0005 for the bootstrap chicken-and-egg note.)
+        # own to plan. gha-runner is deliberately excluded: it's the
+        # self-hosted runner this job itself runs on, so planning it here
+        # would be circular (ADR-0005's bootstrap chicken-and-egg note) -
+        # it's planned/applied manually per its own README instead. Add a
+        # line here for every new service that isn't a bootstrap dependency
+        # of this workflow.
+        service: [omada]
+
     runs-on: [self-hosted, homelab]
+    # Proxmox connection vars/secrets (PROXMOX_ENDPOINT, PROXMOX_NODE,
+    # SSH_PUBLIC_KEY, PROXMOX_API_TOKEN - no TF_ prefix) live in this GitHub
+    # Actions environment, not as plain repo variables/secrets - a job only
+    # gets access to an environment's vars/secrets context if it declares
+    # `environment:`. No protection rules on "homelab", so this doesn't gate
+    # PR runs on manual approval.
+    environment: homelab
     permissions:
       contents: read
       pull-requests: write
+      # Required for aws-actions/configure-aws-credentials' OIDC role
+      # assumption below - without it the runner can't request the GitHub
+      # Actions ID token the AssumeRoleWithWebIdentity call needs.
+      id-token: write
     env:
-      # MinIO (S3-compatible) credentials for the state backend - backend.tf
-      # reads these from the standard AWS_* env vars.
-      AWS_ACCESS_KEY_ID: ${{ secrets.TF_MINIO_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_MINIO_SECRET_ACCESS_KEY }}
-      # Proxmox provider inputs - see environments/homelab/*/variables.tf.
-      # Scoped API token, not root@pam + password - ADR-0007. No SSH
-      # credential needed - see that ADR for why.
-      TF_VAR_proxmox_endpoint: ${{ vars.TF_PROXMOX_ENDPOINT }}
-      TF_VAR_proxmox_api_token: ${{ secrets.TF_PROXMOX_API_TOKEN }}
-      TF_VAR_proxmox_node: ${{ vars.TF_PROXMOX_NODE }}
-      TF_VAR_ssh_public_key: ${{ vars.TF_SSH_PUBLIC_KEY }}
-      # gha-runner-only inputs (GitHub App auth, not a PAT - ADR-0005).
-      # Terraform silently ignores TF_VAR_* env vars that don't match a
-      # declared variable, so these are harmless no-ops for every other
-      # service in the matrix.
-      TF_VAR_github_app_id: ${{ vars.TF_GITHUB_APP_ID }}
-      TF_VAR_github_app_private_key: ${{ secrets.TF_GITHUB_APP_PRIVATE_KEY }}
+      TF_VAR_proxmox_endpoint: ${{ vars.PROXMOX_ENDPOINT }}
+      TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+      TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
+      TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.TF_AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
 
       - name: terraform init
         working-directory: environments/homelab/${{ matrix.service }}

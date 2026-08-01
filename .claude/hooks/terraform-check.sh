@@ -23,7 +23,11 @@ rel="${file#"$repo_root"/}"
 # the root from the path instead of hardcoding a service name, so this stays
 # correct as services are added.
 case "$rel" in
-  modules/fcos-quadlet-vm/*) root="modules/fcos-quadlet-vm" ;;
+  modules/*/*)
+    mod="${rel#modules/}"
+    mod="${mod%%/*}"
+    root="modules/$mod"
+    ;;
   environments/homelab/*/*)
     svc="${rel#environments/homelab/}"
     svc="${svc%%/*}"
