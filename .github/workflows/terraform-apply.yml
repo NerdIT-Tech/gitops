@@ -239,7 +239,7 @@ jobs:
 
       - name: terraform apply
         working-directory: environments/homelab/${{ matrix.service }}
-        run: terraform apply -input=false -auto-approve tfplan
+        run: terraform apply -replace="module.omada.proxmox_virtual_environment_vm.this" -input=false -auto-approve tfplan
 
       # Delivers the Porkbun DNS-01 credentials directly over SSH from this
       # job to the VM - never through Terraform/Butane (ADR-0010: that's
