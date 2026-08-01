@@ -270,7 +270,7 @@ jobs:
           umask 077
           KEY_FILE="$(mktemp)"
           trap 'rm -f "$KEY_FILE"' EXIT
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+          printf '%s' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
 
           CREDENTIALS_FILE="$(terraform output -raw omada_tls_credentials_file)"
 
