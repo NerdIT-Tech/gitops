@@ -94,6 +94,13 @@ jobs:
         service: [omada]
 
     runs-on: [self-hosted, homelab]
+    # Proxmox connection vars/secrets (PROXMOX_ENDPOINT, PROXMOX_NODE,
+    # SSH_PUBLIC_KEY, PROXMOX_API_TOKEN - no TF_ prefix) live in this GitHub
+    # Actions environment, not as plain repo variables/secrets - a job only
+    # gets access to an environment's vars/secrets context if it declares
+    # `environment:`. No protection rules on "homelab", so this doesn't gate
+    # PR runs on manual approval.
+    environment: homelab
     permissions:
       contents: read
       pull-requests: write
@@ -102,10 +109,10 @@ jobs:
       # Actions ID token the AssumeRoleWithWebIdentity call needs.
       id-token: write
     env:
-      TF_VAR_proxmox_endpoint: ${{ vars.TF_PROXMOX_ENDPOINT }}
-      TF_VAR_proxmox_api_token: ${{ secrets.TF_PROXMOX_API_TOKEN }}
-      TF_VAR_proxmox_node: ${{ vars.TF_PROXMOX_NODE }}
-      TF_VAR_ssh_public_key: ${{ vars.TF_SSH_PUBLIC_KEY }}
+      TF_VAR_proxmox_endpoint: ${{ vars.PROXMOX_ENDPOINT }}
+      TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+      TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
+      TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
