@@ -49,3 +49,31 @@ variable "portal_https_port" {
   type        = number
   default     = 8843
 }
+
+variable "enable_tls" {
+  description = "Mount a TLS cert/key pair into the controller at /cert and block the controller's first start on a successful ACME issuance (After=/Requires= on acme_service_name). Pair with modules/porkbun-acme-tls, composed into the same extra_butane_snippets list - see this module's README for the controller-UI-cert conflict warning before enabling this on a VM that has ever had a certificate installed through Omada's own web UI."
+  type        = bool
+  default     = false
+}
+
+variable "tls_cert_dir" {
+  description = "Host directory bind-mounted read-only into the controller as /cert, containing tls.crt/tls.key (mbentley/omada-controller's default expected filenames). Must match the paired porkbun-acme-tls module instance's output_dir. Required when enable_tls is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_tls || var.tls_cert_dir != null
+    error_message = "tls_cert_dir is required when enable_tls is true."
+  }
+}
+
+variable "acme_service_name" {
+  description = "systemd unit name of the ACME issuance/renewal service (the paired porkbun-acme-tls module instance's acme_service_name output) to order the controller's first start after. Required when enable_tls is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_tls || var.acme_service_name != null
+    error_message = "acme_service_name is required when enable_tls is true."
+  }
+}

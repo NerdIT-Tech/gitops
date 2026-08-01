@@ -68,6 +68,7 @@ jobs:
         root:
           - modules/fcos-quadlet-vm
           - modules/omada
+          - modules/porkbun-acme-tls
           - environments/homelab/omada
           - environments/homelab/gha-runner
     steps:
@@ -118,6 +119,10 @@ jobs:
       TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
       TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
       TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
+      # No TF_VAR_porkbun_api_key/secret here, deliberately - modules/porkbun-acme-tls
+      # takes no credential input at all (ADR-0010). Only acme_email
+      # (non-secret) is needed.
+      TF_VAR_acme_email: ${{ vars.ACME_EMAIL }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4

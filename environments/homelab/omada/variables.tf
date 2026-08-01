@@ -20,3 +20,8 @@ variable "proxmox_node" {
 variable "ssh_public_key" {
   type = string
 }
+
+variable "acme_email" {
+  description = "Contact email for Let's Encrypt expiry/revocation notices on omada01's certificate."
+  type        = string
+}

@@ -32,5 +32,8 @@ locals {
     portal_http_port  = var.portal_http_port
     portal_https_port = var.portal_https_port
     tcp_ports         = local.tcp_ports
+    enable_tls        = var.enable_tls
+    tls_cert_dir      = var.tls_cert_dir
+    acme_service_name = var.acme_service_name
   })
 }

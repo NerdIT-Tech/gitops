@@ -1,3 +1,30 @@
+# "How omada01's TLS cert gets issued and renewed" - a Porkbun DNS-01
+# certbot loop, decoupled from Omada itself (ADR-0009, modules/porkbun-acme-tls/README.md)
+# so a future service besides Omada can reuse this module unchanged. One
+# cert, two SANs: the VM's own hostname and the service group's shared name.
+module "omada_tls" {
+  source = "../../../modules/porkbun-acme-tls"
+
+  cert_name    = "omada01"
+  domain_names = ["omada01.canady.cloud", "omada.canady.cloud"]
+  acme_email   = var.acme_email
+
+  # No porkbun_api_key/porkbun_api_secret here, deliberately - this module
+  # takes no credential input at all. See ADR-0010: that value has to be
+  # written out-of-band (SSH) to module.omada_tls.credentials_file, never
+  # through Terraform. credentials_file is left at its default
+  # (/etc/porkbun-credentials/omada01.ini).
+
+  # Must match module.omada_service's tls_cert_dir below - the environment
+  # layer is the single point of truth for this path, not either module
+  # guessing the other's convention.
+  output_dir           = "/var/lib/omada/cert"
+  output_cert_filename = "tls.crt"
+  output_key_filename  = "tls.key"
+  output_owner_uid     = 508
+  output_owner_gid     = 508
+}
+
 # "What Omada is" - Quadlet unit, firewalld service, storage layout.
 # Provisioning-agnostic (no provider, no resources) - see ADR-0008 and
 # modules/omada/README.md. Its only job here is to produce the rendered
@@ -9,6 +36,10 @@ module "omada_service" {
   container_puid  = 508
   container_pgid  = 508
   timezone        = "America/New_York"
+
+  enable_tls        = true
+  tls_cert_dir      = "/var/lib/omada/cert"
+  acme_service_name = module.omada_tls.acme_service_name
 }
 
 # "Where Omada runs" - Proxmox VM sizing/networking/identity. Unchanged in
@@ -36,7 +67,7 @@ module "omada" {
   timezone   = "America/New_York"
   extra_tags = ["omada", "networking"]
 
-  extra_butane_snippets = [module.omada_service.butane_snippet]
+  extra_butane_snippets = [module.omada_service.butane_snippet, module.omada_tls.butane_snippet]
 }
 
 output "omada_ipv4_addresses" {
@@ -45,4 +76,9 @@ output "omada_ipv4_addresses" {
 
 output "omada_ignition_fingerprint" {
   value = module.omada.ignition_fingerprint
+}
+
+output "omada_tls_credentials_file" {
+  description = "Path on omada01 where the Porkbun DNS-01 credentials INI must be written out-of-band (SSH) before module.omada_tls.acme_service_name can succeed - see this environment's README."
+  value       = module.omada_tls.credentials_file
 }
