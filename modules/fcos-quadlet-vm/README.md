@@ -37,7 +37,7 @@ API token couldn't avoid: the snippet upload itself needs SSH regardless of
 API auth method, and - the harder blocker - Proxmox hardcodes the VM's
 `args` field (what `kvm_arguments` sets) to root@pam **password** auth,
 with no grantable privilege a token can hold, even root's own token. See
-[ADR-0007](../../docs/adr/0007-kvm-arguments-requires-root-pam.md) for the
+[ADR-0007](../../docs/adrs/0007-kvm-arguments-requires-root-pam.md) for the
 full finding, verified against Proxmox's own source and a live prototype.
 
 The install-ISO approach in this module needs no SSH connection to Proxmox
@@ -49,8 +49,8 @@ these services (`cargo install coreos-installer --locked` - no prebuilt
 static binary is published upstream). This only matters for `apply`, not
 `plan`/`validate` - the build step is a provisioner, which Terraform never
 executes during a plan. See
-[ADR-0006](../../docs/adr/0006-scoped-api-token-plus-ssh-key.md) and
-[ADR-0001](../../docs/adr/0001-root-pam-password-proxmox-auth.md) for the
+[ADR-0006](../../docs/adrs/0006-scoped-api-token-plus-ssh-key.md) and
+[ADR-0001](../../docs/adrs/0001-root-pam-password-proxmox-auth.md) for the
 earlier setups this superseded.
 
 ## Ignition-only-runs-once, and what that means for edits
@@ -64,7 +64,7 @@ The module makes this drift visible instead of silent via the
 `ignition_fingerprint` output, deliberately **not** wired into
 `replace_triggered_by` (which would auto-destroy the VM's stateful data
 disk on every routine edit). See
-[ADR-0002](../../docs/adr/0002-ignition-fingerprint-not-replace-triggered.md)
+[ADR-0002](../../docs/adrs/0002-ignition-fingerprint-not-replace-triggered.md)
 for why.
 
 **Manual rebuild runbook**, when you see an `ignition_fingerprint` diff you
@@ -93,7 +93,7 @@ pinned to a specific FCOS version, since `zincati` keeps the running VM
 current on its own regardless. Expect `terraform plan` noise on
 `custom_iso_build` (and a real ISO rebuild on `apply`) whenever Fedora
 publishes a new release; this is not a bug. See
-[ADR-0003](../../docs/adr/0003-floating-fcos-stream.md) for the full
+[ADR-0003](../../docs/adrs/0003-floating-fcos-stream.md) for the full
 rationale.
 
 ## Variables of note

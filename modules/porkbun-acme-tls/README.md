@@ -17,9 +17,9 @@ API secret leaked through exactly that design once already (ADR-0010).
 ## What this module is (and isn't)
 
 Same shape as [`modules/omada`](../omada) (see
-[ADR-0008](../../docs/adr/0008-decouple-omada-service-from-vm-provisioning.md)
+[ADR-0008](../../docs/adrs/0008-decouple-omada-service-from-vm-provisioning.md)
 for the reasoning this mirrors, and
-[ADR-0009](../../docs/adr/0009-porkbun-dns01-acme-module.md)/[ADR-0010](../../docs/adr/0010-porkbun-credential-out-of-band.md)
+[ADR-0009](../../docs/adrs/0009-porkbun-dns01-acme-module.md)/[ADR-0010](../../docs/adrs/0010-porkbun-credential-out-of-band.md)
 for why this capability is its own module rather than folded into
 `modules/omada`, and why it takes no credential input at all): **no
 resources, no data sources, no provider requirements.** It takes
@@ -71,7 +71,7 @@ mark propagation doesn't reach through, and `ct`'s schema doesn't declare
 that attribute sensitive. The result: `local_file.rendered_ignition` (and
 everything downstream of it - the install ISO build, the Proxmox upload)
 showed the credential in cleartext in `terraform plan` output, unredacted,
-in CI, in a PR comment. See [ADR-0010](../../docs/adr/0010-porkbun-credential-out-of-band.md)
+in CI, in a PR comment. See [ADR-0010](../../docs/adrs/0010-porkbun-credential-out-of-band.md)
 for the full incident writeup.
 
 The fix is structural, not "redact harder": **this module never receives
