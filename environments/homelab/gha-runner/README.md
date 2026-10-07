@@ -2,7 +2,7 @@
 
 This provisions the one VM that gives `.github/workflows/terraform-pr.yml`'s
 `plan` job (`runs-on: [self-hosted, homelab]`) somewhere to run - see
-[ADR-0005](../../../docs/adr/0005-self-hosted-runner-as-managed-service.md)
+[ADR-0005](../../../docs/adrs/0005-self-hosted-runner-as-managed-service.md)
 for why it's built this way. **This is the one thing in this repo that
 cannot be applied via CI** - the `plan` job needs this runner to already
 exist, so the first apply has to happen locally, by hand, once.
@@ -68,7 +68,7 @@ if you're pointing this at something else.
 
 Requires `coreos-installer` on whatever machine runs `terraform apply` -
 the module's `custom_iso_build` step shells out to it to embed Ignition
-into an install ISO (see [ADR-0007](../../../docs/adr/0007-kvm-arguments-requires-root-pam.md)).
+into an install ISO (see [ADR-0007](../../../docs/adrs/0007-kvm-arguments-requires-root-pam.md)).
 No prebuilt static binary is published upstream:
 
 ```

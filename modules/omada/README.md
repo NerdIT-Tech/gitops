@@ -14,7 +14,7 @@ requirements** - it takes service-shaped inputs (image tag, PUID/PGID,
 timezone, ports) and produces one output, `butane_snippet`: a fully
 rendered Butane YAML string. It does not know or care what boots that
 config. That's the point - see
-[ADR-0008](../../docs/adr/0008-decouple-omada-service-from-vm-provisioning.md)
+[ADR-0008](../../docs/adrs/0008-decouple-omada-service-from-vm-provisioning.md)
 for the full reasoning behind drawing the boundary here.
 
 To actually run Omada, compose this module's `butane_snippet` output into a
@@ -83,7 +83,7 @@ it.
 Omada's controller state (device inventory, adopted APs, settings) lives on
 `/var/lib/omada/data`, on the VM's own disk - this module has no opinion on
 backup/snapshotting, that's the provisioning module's and environment's
-job. Combined with [ADR-0002](../../docs/adr/0002-ignition-fingerprint-not-replace-triggered.md)
+job. Combined with [ADR-0002](../../docs/adrs/0002-ignition-fingerprint-not-replace-triggered.md)
 (Ignition is first-boot-only, drift is surfaced not auto-applied), any
 change to this module's rendered output on an **already-provisioned** VM
 needs the manual rebuild+restore runbook documented in

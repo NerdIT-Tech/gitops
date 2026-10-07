@@ -1,7 +1,7 @@
 # This module owns *what* Omada is (the Quadlet unit, its firewalld
 # service, its storage layout) and nothing about *where* it runs - no
 # provider, no resources, no state. It renders Butane YAML and hands it
-# back as a string. See ../../docs/adr/0008-decouple-omada-service-from-vm-provisioning.md
+# back as a string. See ../../docs/adrs/0008-decouple-omada-service-from-vm-provisioning.md
 # for why the boundary is drawn here and what a VM-provisioning module
 # (fcos-quadlet-vm today; conceivably an Azure/GCP/libvirt one later) is
 # expected to accept in return.
