@@ -1,0 +1,156 @@
+variant: fcos
+version: 1.5.0
+
+storage:
+  files:
+    # Rendered inline at plan time, not fetched at runtime - same "config is
+    # part of the Ignition file, not curl'd from somewhere at boot" shape as
+    # every other service in this repo. Mounted read-only over the stock
+    # nginx image's /etc/nginx/conf.d/default.conf (not alongside it as a
+    # differently-named file) so the image's own default server block -
+    # which also listens on 80 - can't collide with listen_port/http_port
+    # below.
+    - path: /etc/${proxy_name}-proxy/nginx.conf
+      mode: 0644
+      contents:
+        inline: |
+          server {
+              listen ${listen_port} ssl;
+              listen [::]:${listen_port} ssl;
+              server_name ${server_names};
+
+              ssl_certificate     /cert/${tls_cert_filename};
+              ssl_certificate_key /cert/${tls_key_filename};
+
+              location / {
+                  proxy_pass http://${upstream_host}:${upstream_port};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+
+                  # Upgrade headers for WebSocket-using management UIs (e.g.
+                  # Omada's controller UI uses WS for live device status) -
+                  # harmless no-op for any client that never sends
+                  # Connection: Upgrade.
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+              }
+          }
+%{ if redirect_http ~}
+
+          server {
+              listen ${http_port};
+              listen [::]:${http_port};
+              server_name ${server_names};
+
+              return 301 https://$host$request_uri;
+          }
+%{ endif ~}
+
+    - path: /etc/containers/systemd/${proxy_name}-proxy.container
+      mode: 0644
+      contents:
+        inline: |
+          [Unit]
+          Description=nginx reverse proxy for ${proxy_name}
+          After=network-online.target
+          Wants=network-online.target
+          After=${acme_service_name}
+          Requires=${acme_service_name}
+
+          [Container]
+          Image=docker.io/library/nginx:${nginx_image_tag}
+          ContainerName=${proxy_name}-proxy
+          AutoUpdate=registry
+          Network=host
+
+          # :ro on the config file mirrors this repo's other single-file
+          # bind mounts (e.g. porkbun-acme-tls's credentials_file). :ro,Z
+          # on the cert directory mirrors this repo's other *directory*
+          # mounts (e.g. modules/omada's data/logs/cert volumes all use Z)
+          # - the official nginx image's master process runs as root by
+          # default, so it needs SELinux relabeling to read a directory
+          # last labeled for a different container, not a PUID/PGID match.
+          Volume=/etc/${proxy_name}-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+          Volume=${tls_cert_dir}:/cert:ro,Z
+
+          HealthCmd=curl -k -f https://localhost:${listen_port}
+          HealthInterval=30s
+          HealthTimeout=10s
+          HealthRetries=3
+
+          [Service]
+          Restart=always
+          TimeoutStartSec=300
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - path: /etc/firewalld/services/${proxy_name}-proxy.xml
+      mode: 0644
+      contents:
+        inline: |
+          <?xml version="1.0" encoding="utf-8"?>
+          <service>
+            <short>${proxy_name} reverse proxy</short>
+            <description>nginx TLS-terminating reverse proxy in front of ${proxy_name}</description>
+%{ for port in tcp_ports ~}
+            <port protocol="tcp" port="${port}"/>
+%{ endfor ~}
+          </service>
+
+systemd:
+  units:
+    - name: podman-auto-update.timer
+      enabled: true
+
+    - name: ${proxy_name}-proxy-firewall.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Open ${proxy_name} reverse proxy ports in firewalld
+        After=firewalld.service
+        Requires=firewalld.service
+        Before=${proxy_name}-proxy.service
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/bin/firewall-cmd --permanent --add-service=${proxy_name}-proxy
+        ExecStart=/usr/bin/firewall-cmd --reload
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: ${proxy_name}-proxy-cert-reload.path
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Watch for a renewed ${proxy_name} reverse proxy TLS cert
+
+        [Path]
+        PathModified=${tls_cert_dir}/${tls_cert_filename}
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: ${proxy_name}-proxy-cert-reload.service
+      contents: |
+        [Unit]
+        Description=Reload nginx to pick up a renewed TLS cert for ${proxy_name}
+
+        [Service]
+        Type=oneshot
+        # `nginx -s reload` re-reads config and re-opens the paths given to
+        # ssl_certificate/ssl_certificate_key, spawning fresh workers
+        # without dropping the old workers' in-flight connections -
+        # gracefully-draining, unlike modules/omada's
+        # omada-cert-reload.service, which has to fully restart the
+        # controller because its entrypoint only converts the mounted PEM
+        # into a Java keystore once, at container start. Nothing here needs
+        # that keystore step, so there's no reason to pay for a full
+        # container restart (and its dropped connections) when a signal
+        # does the job.
+        ExecStart=/usr/bin/podman exec ${proxy_name}-proxy nginx -s reload

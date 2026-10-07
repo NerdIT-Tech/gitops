@@ -15,14 +15,20 @@ module "omada_tls" {
   # through Terraform. credentials_file is left at its default
   # (/etc/porkbun-credentials/omada01.ini).
 
-  # Must match module.omada_service's tls_cert_dir below - the environment
+  # Must match module.omada_nginx's tls_cert_dir below - the environment
   # layer is the single point of truth for this path, not either module
   # guessing the other's convention.
   output_dir           = "/var/lib/omada/cert"
   output_cert_filename = "tls.crt"
   output_key_filename  = "tls.key"
-  output_owner_uid     = 508
-  output_owner_gid     = 508
+
+  # root, not the controller's 508:508 PUID/PGID this used to be set to -
+  # nginx (modules/nginx-reverse-proxy), not the controller, is the only
+  # consumer of this directory now (see module.omada_nginx below), and the
+  # official nginx image's master process runs as root by default. There's
+  # no non-root UID that specifically needs read access here.
+  output_owner_uid = 0
+  output_owner_gid = 0
 }
 
 # "What Omada is" - Quadlet unit, firewalld service, storage layout.
@@ -37,7 +43,39 @@ module "omada_service" {
   container_pgid  = 508
   timezone        = "America/New_York"
 
-  enable_tls        = true
+  # enable_tls left at its default (false): TLS is terminated by
+  # module.omada_nginx now, not the controller itself - see that module
+  # block below and environments/homelab/omada/README.md's TLS section.
+  # The controller stays on plain HTTP on manage_http_port (default 8088,
+  # left unset here), reachable only from nginx via 127.0.0.1.
+}
+
+# "How omada01's management UI is reached over TLS" - nginx terminates
+# HTTPS for the controller's management UI and proxies to the controller's
+# own plain-HTTP port on localhost (Network=host on both containers, so
+# 127.0.0.1 is shared). Generic (modules/nginx-reverse-proxy), not
+# Omada-specific - see that module's README for why. TLS ownership moved
+# here from module.omada_service above so exactly one thing on omada01
+# presents a certificate for these hostnames - see this environment's
+# README for the "why nginx, not the controller" reasoning and rebuild
+# implications.
+module "omada_nginx" {
+  source = "../../../modules/nginx-reverse-proxy"
+
+  proxy_name   = "omada"
+  server_names = ["omada01.canady.cloud", "omada.canady.cloud"]
+
+  # Must match module.omada_service's manage_http_port above. Left as a
+  # literal here, matching module.omada_service's own manage_http_port
+  # default (8088, not overridden above) - modules/omada doesn't currently
+  # output that port, so there's nothing to reference directly. If a
+  # second consumer of that port ever shows up, add the output instead of
+  # duplicating this literal a third time.
+  upstream_port = 8088
+
+  # Must match module.omada_tls's output_dir/filenames above - the
+  # environment layer is the single point of truth for this path, not
+  # either module guessing the other's convention.
   tls_cert_dir      = "/var/lib/omada/cert"
   acme_service_name = module.omada_tls.acme_service_name
 }
@@ -67,7 +105,11 @@ module "omada" {
   timezone   = "America/New_York"
   extra_tags = ["omada", "networking"]
 
-  extra_butane_snippets = [module.omada_service.butane_snippet, module.omada_tls.butane_snippet]
+  extra_butane_snippets = [
+    module.omada_service.butane_snippet,
+    module.omada_nginx.butane_snippet,
+    module.omada_tls.butane_snippet,
+  ]
 }
 
 output "omada_ipv4_addresses" {

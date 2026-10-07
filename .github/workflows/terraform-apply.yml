@@ -240,7 +240,10 @@ jobs:
       - name: terraform apply
         working-directory: environments/homelab/${{ matrix.service }}
         run: |
-          terraform plan -replace="module.omada.proxmox_virtual_environment_vm.this" -no-color -input=false -out=tfplan
+          if [ ! -f tfplan ]; then
+            echo "No reviewed tfplan artifact found; planning fresh (never with -replace)."
+            terraform plan -no-color -input=false -out=tfplan
+          fi
           terraform apply -input=false -auto-approve tfplan
 
       # Delivers the Porkbun DNS-01 credentials directly over SSH from this
@@ -264,7 +267,7 @@ jobs:
         if: matrix.service == 'omada'
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          PORKBUN_API_KEY: ${{ vars.PORKBUN_API_KEY }}
+          PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
           PORKBUN_API_SECRET: ${{ secrets.PORKBUN_API_SECRET }}
         working-directory: environments/homelab/${{ matrix.service }}
         run: |
@@ -318,9 +321,9 @@ jobs:
           dns_porkbun_secret=$PORKBUN_API_SECRET
           EOF
 
-          # omada.service (Requires=acme-omada01.service) will have already
-          # tried and failed to start at boot, before this step got a
-          # chance to write the credentials file above - and with
+          # omada-proxy.service (the nginx reverse proxy, Requires=acme-omada01.service)
+          # will have already tried and failed to start at boot, before this
+          # step got a chance to write the credentials file above - and with
           # systemd's default StartLimitBurst=5/StartLimitIntervalSec=10,
           # its own Restart=always will have hit the start-limit and given
           # up within the first few seconds, long before this step's SSH
@@ -329,8 +332,13 @@ jobs:
           # start both units in order now that the credentials they needed
           # actually exist. A no-op (both already active) on any run where
           # the VM was already up and healthy.
+          #
+          # omada.service itself is NOT gated on acme-omada01.service (TLS
+          # termination moved to omada-proxy.service - see
+          # environments/homelab/omada/README.md's TLS section) so it needs
+          # no equivalent nudge here; it will already be up on its own.
           ssh "${SSH_OPTS[@]}" core@"$OMADA_IP" \
-            'sudo systemctl reset-failed acme-omada01.service omada.service 2>/dev/null; sudo systemctl start acme-omada01.service && sudo systemctl start omada.service'
+            'sudo systemctl reset-failed acme-omada01.service omada-proxy.service 2>/dev/null; sudo systemctl start acme-omada01.service && sudo systemctl start omada-proxy.service'
 
   # The PR's sticky per-service plan comment (from terraform-pr.yml) has now
   # been applied and is no longer useful - remove it rather than leave

@@ -67,6 +67,7 @@ jobs:
         # every new module or service.
         root:
           - modules/fcos-quadlet-vm
+          - modules/nginx-reverse-proxy
           - modules/omada
           - modules/porkbun-acme-tls
           - environments/homelab/omada
@@ -147,8 +148,8 @@ jobs:
         continue-on-error: true
 
       # Saved so a merge of this PR can apply exactly what was reviewed
-      # here instead of re-planning after merge, once an apply workflow
-      # exists to consume it.
+      # here instead of re-planning after merge - terraform-apply.yml
+      # downloads this artifact on the merged-PR path.
       - name: Upload plan artifact
         if: steps.plan.outcome == 'success'
         uses: actions/upload-artifact@v7

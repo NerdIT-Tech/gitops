@@ -1,0 +1,7 @@
+# Copy to vars.tfvars and fill in. vars.tfvars is gitignored — never commit real values.
+proxmox_endpoint       = "https://proxmoxnode01:8006/"
+proxmox_api_token      = "user@pve!token-id=secret-uuid"
+proxmox_insecure       = false
+proxmox_node           = "proxmoxnode01"
+ssh_public_key         = "ssh-ed25519 AAAA... you@example"
+acme_email             = "you@example.com"
