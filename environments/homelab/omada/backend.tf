@@ -6,6 +6,8 @@
 # (or your CI secret store) - never commit them here.
 
 terraform {
+  required_version = ">= 1.10.0" # use_lockfile needs Terraform >= 1.10
+
   backend "s3" {
     bucket = "nerdit-tech-terraform-state"
     # One Terraform root per service, one state key per root (ADR-0004) -
