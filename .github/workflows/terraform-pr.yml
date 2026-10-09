@@ -100,12 +100,11 @@ jobs:
         service: [omada]
 
     runs-on: [self-hosted, homelab]
-    # Proxmox connection vars/secrets (PROXMOX_ENDPOINT, PROXMOX_NODE,
-    # SSH_PUBLIC_KEY, PROXMOX_API_TOKEN - no TF_ prefix) live in this GitHub
-    # Actions environment, not as plain repo variables/secrets - a job only
-    # gets access to an environment's vars/secrets context if it declares
-    # `environment:`. No protection rules on "homelab", so this doesn't gate
-    # PR runs on manual approval.
+    # TF_AWS_PLAN_ROLE_ARN (the read-only OIDC role for backend access) lives
+    # in this GitHub Actions environment, not as a plain repo variable - a
+    # job only gets access to an environment's vars/secrets context if it
+    # declares `environment:`. No protection rules on "homelab", so this
+    # doesn't gate PR runs on manual approval.
     environment: homelab
     permissions:
       contents: read
@@ -114,15 +113,6 @@ jobs:
       # assumption below - without it the runner can't request the GitHub
       # Actions ID token the AssumeRoleWithWebIdentity call needs.
       id-token: write
-    env:
-      TF_VAR_proxmox_endpoint: ${{ vars.PROXMOX_ENDPOINT }}
-      TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
-      TF_VAR_proxmox_node: ${{ vars.PROXMOX_NODE }}
-      TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
-      # No TF_VAR_porkbun_api_key/secret here, deliberately - modules/porkbun-acme-tls
-      # takes no credential input at all (ADR-0010). Only acme_email
-      # (non-secret) is needed.
-      TF_VAR_acme_email: ${{ vars.ACME_EMAIL }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
