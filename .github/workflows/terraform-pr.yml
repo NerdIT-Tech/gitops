@@ -100,12 +100,11 @@ jobs:
         service: [omada]
 
     runs-on: [self-hosted, homelab]
-    # Proxmox connection vars/secrets (PROXMOX_ENDPOINT, PROXMOX_NODE,
-    # SSH_PUBLIC_KEY, PROXMOX_API_TOKEN - no TF_ prefix) live in this GitHub
-    # Actions environment, not as plain repo variables/secrets - a job only
-    # gets access to an environment's vars/secrets context if it declares
-    # `environment:`. No protection rules on "homelab", so this doesn't gate
-    # PR runs on manual approval.
+    # TF_AWS_PLAN_ROLE_ARN (the read-only OIDC role for backend access) lives
+    # in this GitHub Actions environment, not as a plain repo variable - a
+    # job only gets access to an environment's vars/secrets context if it
+    # declares `environment:`. No protection rules on "homelab", so this
+    # doesn't gate PR runs on manual approval.
     environment: homelab
     permissions:
       contents: read

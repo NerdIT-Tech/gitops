@@ -30,5 +30,5 @@ in `terraform-pr.yml`/`terraform-apply.yml` can be deleted.
 Terraform no longer manages `omada01`, but the VM and its controller data
 (`/var/lib/omada/data`) are untouched. To manage it again, re-add the
 `module.omada` block and `terraform import` its resources. See
-[ADR-0004](../../../docs/adrs/0004-per-service-terraform-root-and-state.md)
+[ADR-0004](../../../docs/adr/0004-per-service-terraform-root-and-state.md)
 for why this root/state key is separate from every other service.
